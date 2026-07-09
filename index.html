@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BT Capaciteitsplanning</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="loginScherm" class="login-scherm">
+  <form id="loginForm" class="login-kaart">
+    <h1>BT Capaciteitsplanning</h1>
+    <p class="login-sub">Log in om verder te gaan</p>
+    <div class="veld"><label>Gebruikersnaam</label><input name="gebruiker" autocomplete="username" required></div>
+    <div class="veld"><label>Wachtwoord</label><input name="wachtwoord" type="password" autocomplete="current-password" required></div>
+    <p id="loginFout" class="login-fout hidden">Onjuiste gebruikersnaam of wachtwoord.</p>
+    <button type="submit" class="btn">Inloggen</button>
+    <p class="login-hint">Prototype-inlog: gebruikersnaam <strong>BT</strong>, wachtwoord <strong>BT</strong>.</p>
+  </form>
+</div>
+
+<div id="appShell" class="hidden">
+  <header class="topbar">
+    <div class="toolbar">
+      <h1>BT Capaciteitsplanning <span class="badge-proto">prototype</span></h1>
+      <button id="uitloggenBtn" class="btn secundair klein">Uitloggen</button>
+    </div>
+    <nav id="mainNav" class="tabs">
+      <button data-page="dashboard" class="tab active">Dashboard</button>
+      <button data-page="medewerkers" class="tab">Medewerkers</button>
+      <button data-page="verlof" class="tab">Verlof</button>
+      <button data-page="werkitems" class="tab">Capaciteitsplanning</button>
+      <button data-page="verstoringen" class="tab">Verstoringen</button>
+      <button data-page="rapportages" class="tab">Rapportages</button>
+    </nav>
+  </header>
+
+  <main id="pageContent"></main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/auth.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/models.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/capacity.js"></script>
+<script src="js/employees.js"></script>
+<script src="js/leave.js"></script>
+<script src="js/workitems.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/incidents.js"></script>
+<script src="js/reports.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
