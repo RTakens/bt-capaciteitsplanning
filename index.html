@@ -747,13 +747,18 @@ App.capacity = (function () {
       medewerkerBeschikbaarInPeriode(medewerker, periodeStart, periodeEind, alleVerlof);
     const relevanteItems = alleWerkitems.filter(w => w.medewerkerIds.includes(medewerker.id));
     const perType = { operatie: 0, valuestream: 0, project: 0, incident: 0 };
+    const werkitemDetails = [];
     let gepland = 0;
 
     relevanteItems.forEach(item => {
       const uren = werkitemUrenVoorMedewerker(item, medewerker.id, periodeStart, periodeEind);
       gepland += uren;
       perType[item.type] = (perType[item.type] || 0) + uren;
+      if (uren > 0) {
+        werkitemDetails.push({ id: item.id, titel: item.titel, type: item.type, status: item.status, uren });
+      }
     });
+    werkitemDetails.sort((a, b) => b.uren - a.uren);
 
     const ratio = beschikbaar > 0 ? gepland / beschikbaar : (gepland > 0 ? 2 : 0);
     // Iemand die de hele periode op verlof is, is niet "onderbenut" - er is simpelweg geen capaciteit.
@@ -762,7 +767,7 @@ App.capacity = (function () {
     const status = statusVoorRatio(ratio);
 
     return {
-      medewerker, beschikbaar, gepland, verlofDagen, standbyDagen, totaalWerkdagen, perType, ratio, status,
+      medewerker, beschikbaar, gepland, verlofDagen, standbyDagen, totaalWerkdagen, perType, werkitemDetails, ratio, status,
       onderbenut, opVerlof, overbelastMetVerlof: status === 'rood' && heeftVerlofNietHerhalend
     };
   }
@@ -921,6 +926,8 @@ window.App = window.App || {};
 
 App.pages.verlof = (function () {
   let bewerkIds = null;
+  let bewerkTerugkerendIds = null;
+  let filterMedewerkerId = '';
 
   function render(container) {
     const medewerkers = App.data.medewerkers();
@@ -956,7 +963,7 @@ App.pages.verlof = (function () {
         </div>
 
         <div class="card">
-          <h3>Terugkerend verlof (vaste vrije dag)</h3>
+          <h3 id="terugkerendFormTitel">Terugkerend verlof (vaste vrije dag)</h3>
           <p style="font-size:13px;color:#6b7280">Bijvoorbeeld: iedere maandag vrij, of om de week op vrijdag.</p>
           <form id="terugkerendForm">
             <div class="veld">
@@ -992,7 +999,8 @@ App.pages.verlof = (function () {
               <div class="veld"><label>Tot en met</label><input type="date" name="tot" required></div>
             </div>
             <div class="veld"><label>Opmerking</label><input name="opmerking"></div>
-            <button type="submit" class="btn">Terugkerend verlof toevoegen</button>
+            <button type="submit" class="btn" id="terugkerendSubmitBtn">Terugkerend verlof toevoegen</button>
+            <button type="button" id="annuleerTerugkerendBtn" class="btn secundair" style="display:none">Annuleren</button>
           </form>
         </div>
       </div>
@@ -1027,8 +1035,17 @@ App.pages.verlof = (function () {
       </div>
 
       <div class="card">
-        <h3>Alle verlofregels</h3>
-        <p style="font-size:13px;color:#6b7280">Opeenvolgende werkdagen met hetzelfde type worden hier samengevoegd tot één periode.</p>
+        <div class="toolbar">
+          <h3 style="margin:0">Alle verlofregels</h3>
+          <div class="veld" style="margin:0">
+            <label>Filter op medewerker</label>
+            <select id="filterMedewerker">
+              <option value="">Alle medewerkers</option>
+              ${optiesMedewerkers(medewerkers)}
+            </select>
+          </div>
+        </div>
+        <p style="font-size:13px;color:#6b7280">Opeenvolgende dagen (incl. weekenden) met hetzelfde type worden samengevoegd tot één periode; terugkerend verlof wordt samengevoegd tot één reeks.</p>
         <div class="tabel-wrap">
           <table>
             <thead><tr><th>Medewerker</th><th>Periode</th><th>Type</th><th>Opmerking</th><th></th></tr></thead>
@@ -1043,9 +1060,11 @@ App.pages.verlof = (function () {
     document.getElementById('verlofForm').addEventListener('submit', opSlaan);
     document.getElementById('annuleerBtn').addEventListener('click', resetForm);
     document.getElementById('terugkerendForm').addEventListener('submit', voegTerugkerendToe);
+    document.getElementById('annuleerTerugkerendBtn').addEventListener('click', resetTerugkerendForm);
     document.getElementById('importBtn').addEventListener('click', importeer);
     document.getElementById('matrixVan').addEventListener('change', tekenMatrix);
     document.getElementById('matrixTot').addEventListener('change', tekenMatrix);
+    document.getElementById('filterMedewerker').addEventListener('change', e => { filterMedewerkerId = e.target.value; tekenLijst(); });
   }
 
   function optiesMedewerkers(medewerkers) {
@@ -1105,8 +1124,10 @@ App.pages.verlof = (function () {
     return r;
   }
 
+  const WEEKDAG_VOL = { 0: 'zondag', 1: 'maandag', 2: 'dinsdag', 3: 'woensdag', 4: 'donderdag', 5: 'vrijdag', 6: 'zaterdag' };
+
   // Voegt opeenvolgende dagen (incl. weekenden) met dezelfde medewerker/type/opmerking samen tot één periode-rij
-  function groepeerVoorWeergave(lijst) {
+  function groepeerOpeenvolgend(lijst) {
     const sortedVoorGroepering = [...lijst].sort((a, b) =>
       a.medewerkerId.localeCompare(b.medewerkerId) || a.type.localeCompare(b.type) ||
       (a.opmerking || '').localeCompare(b.opmerking || '') || a.datum.localeCompare(b.datum)
@@ -1120,25 +1141,65 @@ App.pages.verlof = (function () {
         laatste.eindDatum = v.datum;
         laatste.ids.push(v.id);
       } else {
-        groepen.push({ medewerkerId: v.medewerkerId, type: v.type, opmerking: v.opmerking, startDatum: v.datum, eindDatum: v.datum, ids: [v.id] });
+        groepen.push({ medewerkerId: v.medewerkerId, type: v.type, opmerking: v.opmerking, startDatum: v.datum, eindDatum: v.datum, ids: [v.id], herhalend: false });
       }
     });
+    return groepen;
+  }
+
+  // Voegt alle voorkomens van dezelfde terugkerende reeks (medewerker/type/opmerking/weekdag) samen tot één rij
+  function groepeerTerugkerend(lijst) {
+    const perSleutel = {};
+    lijst.forEach(v => {
+      const weekdag = App.datum.parseIso(v.datum).getDay();
+      const sleutel = [v.medewerkerId, v.type, v.opmerking || '', weekdag].join('|');
+      if (!perSleutel[sleutel]) perSleutel[sleutel] = [];
+      perSleutel[sleutel].push(v);
+    });
+
+    return Object.values(perSleutel).map(entries => {
+      const datums = entries.map(e => e.datum).sort();
+      const diffsInDagen = [];
+      for (let i = 1; i < datums.length; i++) {
+        diffsInDagen.push((App.datum.parseIso(datums[i]) - App.datum.parseIso(datums[i - 1])) / 86400000);
+      }
+      const alle7 = diffsInDagen.length > 0 && diffsInDagen.every(d => d === 7);
+      const alle14 = diffsInDagen.length > 0 && diffsInDagen.every(d => d === 14);
+      const intervalLabel = alle7 ? 'Elke ' : alle14 ? 'Om de week op ' : 'Periodiek op ';
+      return {
+        medewerkerId: entries[0].medewerkerId, type: entries[0].type, opmerking: entries[0].opmerking,
+        startDatum: datums[0], eindDatum: datums[datums.length - 1],
+        ids: entries.map(e => e.id), herhalend: true, intervalLabel
+      };
+    });
+  }
+
+  function groepeerVoorWeergave(lijst) {
+    const herhalendLijst = lijst.filter(v => v.herhalend);
+    const normaalLijst = lijst.filter(v => !v.herhalend);
+    const groepen = [...groepeerOpeenvolgend(normaalLijst), ...groepeerTerugkerend(herhalendLijst)];
     return groepen.sort((a, b) => b.startDatum.localeCompare(a.startDatum));
   }
 
   function periodeTekst(groep) {
-    if (groep.startDatum === groep.eindDatum) return App.datum.formatKort(App.datum.parseIso(groep.startDatum));
-    return `${App.datum.formatKort(App.datum.parseIso(groep.startDatum))} t/m ${App.datum.formatKort(App.datum.parseIso(groep.eindDatum))}`;
+    const bereik = groep.startDatum === groep.eindDatum
+      ? App.datum.formatKort(App.datum.parseIso(groep.startDatum))
+      : `${App.datum.formatKort(App.datum.parseIso(groep.startDatum))} t/m ${App.datum.formatKort(App.datum.parseIso(groep.eindDatum))}`;
+    if (!groep.herhalend) return bereik;
+    const weekdag = WEEKDAG_VOL[App.datum.parseIso(groep.startDatum).getDay()];
+    return `${groep.intervalLabel}${weekdag}, ${bereik}`;
   }
 
   function tekenLijst() {
     const medewerkers = App.data.medewerkers();
     const naamVan = id => (medewerkers.find(m => m.id === id) || {}).naam || 'Onbekend';
-    const groepen = groepeerVoorWeergave(App.data.verlof());
+    let verlofData = App.data.verlof();
+    if (filterMedewerkerId) verlofData = verlofData.filter(v => v.medewerkerId === filterMedewerkerId);
+    const groepen = groepeerVoorWeergave(verlofData);
     const tbody = document.getElementById('verlofTbody');
 
     if (!groepen.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="leeg-melding">Nog geen verlof geregistreerd.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="leeg-melding">Geen verlof gevonden.</td></tr>';
       return;
     }
     tbody.innerHTML = groepen.map((g, idx) => `
@@ -1149,12 +1210,15 @@ App.pages.verlof = (function () {
         <td>${App.ui.escapeHtml(g.opmerking)}</td>
         <td>
           <button class="btn secundair klein" data-actie="wijzig" data-idx="${idx}">Wijzig</button>
-          <button class="btn gevaar klein" data-actie="verwijder" data-idx="${idx}">Verwijder</button>
+          <button class="btn gevaar klein" data-actie="verwijder" data-idx="${idx}">Verwijder${g.herhalend ? ' reeks' : ''}</button>
         </td>
       </tr>
     `).join('');
 
-    tbody.querySelectorAll('[data-actie="wijzig"]').forEach(b => b.addEventListener('click', () => beginWijzig(groepen[Number(b.dataset.idx)])));
+    tbody.querySelectorAll('[data-actie="wijzig"]').forEach(b => b.addEventListener('click', () => {
+      const groep = groepen[Number(b.dataset.idx)];
+      if (groep.herhalend) beginWijzigTerugkerend(groep); else beginWijzig(groep);
+    }));
     tbody.querySelectorAll('[data-actie="verwijder"]').forEach(b => b.addEventListener('click', () => verwijder(groepen[Number(b.dataset.idx)])));
   }
 
@@ -1176,6 +1240,30 @@ App.pages.verlof = (function () {
     document.getElementById('verlofForm').reset();
     document.getElementById('formTitel').textContent = 'Verlof/standby toevoegen';
     document.getElementById('annuleerBtn').style.display = 'none';
+  }
+
+  function beginWijzigTerugkerend(groep) {
+    bewerkTerugkerendIds = groep.ids;
+    const form = document.getElementById('terugkerendForm');
+    form.medewerkerId.value = groep.medewerkerId;
+    form.weekdag.value = String(App.datum.parseIso(groep.startDatum).getDay());
+    form.interval.value = groep.intervalLabel === 'Om de week op ' ? '2' : '1';
+    form.type.value = groep.type;
+    form.vanaf.value = groep.startDatum;
+    form.tot.value = groep.eindDatum;
+    form.opmerking.value = groep.opmerking || '';
+    document.getElementById('terugkerendFormTitel').textContent = 'Terugkerend verlof wijzigen';
+    document.getElementById('terugkerendSubmitBtn').textContent = 'Wijzigingen opslaan';
+    document.getElementById('annuleerTerugkerendBtn').style.display = 'inline-block';
+    form.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function resetTerugkerendForm() {
+    bewerkTerugkerendIds = null;
+    document.getElementById('terugkerendForm').reset();
+    document.getElementById('terugkerendFormTitel').textContent = 'Terugkerend verlof (vaste vrije dag)';
+    document.getElementById('terugkerendSubmitBtn').textContent = 'Terugkerend verlof toevoegen';
+    document.getElementById('annuleerTerugkerendBtn').style.display = 'none';
   }
 
   function opSlaan(e) {
@@ -1232,7 +1320,9 @@ App.pages.verlof = (function () {
     const eersteDatum = new Date(vanaf.getTime());
     while (eersteDatum.getDay() !== weekdag) eersteDatum.setDate(eersteDatum.getDate() + 1);
 
-    const lijst = App.data.verlof();
+    let lijst = App.data.verlof();
+    if (bewerkTerugkerendIds) lijst = lijst.filter(x => !bewerkTerugkerendIds.includes(x.id));
+
     let aantal = 0;
     for (let d = new Date(eersteDatum.getTime()); d <= tot; d.setDate(d.getDate() + 7 * interval)) {
       if (!App.datum.isWerkdag(d)) continue; // slaat NL-feestdagen op deze weekdag over
@@ -1245,8 +1335,8 @@ App.pages.verlof = (function () {
     }
 
     App.data.bewaarVerlof(lijst);
-    App.ui.melding(`${aantal} terugkerende verlofdagen toegevoegd`);
-    form.reset();
+    App.ui.melding(bewerkTerugkerendIds ? 'Terugkerend verlof gewijzigd' : `${aantal} terugkerende verlofdagen toegevoegd`);
+    resetTerugkerendForm();
     tekenMatrix();
     tekenLijst();
   }
@@ -1593,6 +1683,7 @@ App.pages.dashboard = (function () {
   let refDatum = new Date();
   let splitsPerFunctie = false;
   let aantalWekenVooruit = 8;
+  let uitgeklapt = new Set();
 
   function render(container) {
     container.innerHTML = `
@@ -1713,6 +1804,11 @@ App.pages.dashboard = (function () {
       aantalWekenVooruit = Number(e.target.value);
       tekenInhoud();
     });
+    document.querySelectorAll('[data-toggle-medewerker]').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.toggleMedewerker;
+      if (uitgeklapt.has(id)) uitgeklapt.delete(id); else uitgeklapt.add(id);
+      tekenInhoud();
+    }));
   }
 
   function tekenVooruitblik(medewerkers, werkitems, verlof) {
@@ -1757,14 +1853,36 @@ App.pages.dashboard = (function () {
   }
 
   function rijMedewerker(r) {
-    return `<tr>
-      <td>${App.ui.escapeHtml(r.medewerker.naam)}</td>
+    const isOpen = uitgeklapt.has(r.medewerker.id);
+    const hoofdRij = `<tr>
+      <td>
+        <button type="button" class="btn secundair klein" data-toggle-medewerker="${r.medewerker.id}" style="margin-right:6px">${isOpen ? '▾' : '▸'}</button>${App.ui.escapeHtml(r.medewerker.naam)}
+      </td>
       <td>${App.ui.escapeHtml(r.medewerker.team)}</td>
       <td>${rond(r.beschikbaar)}u</td>
       <td>${rond(r.gepland)}u</td>
       <td style="min-width:120px">${balk(r.ratio, r.status)} ${Math.round(r.ratio * 100)}%</td>
       <td><span class="badge ${badgeKlasse(r)}">${labelStatusMedewerker(r)}</span></td>
     </tr>`;
+    if (!isOpen) return hoofdRij;
+    return hoofdRij + `<tr><td colspan="6" style="background:var(--grijs-bg)">${tekenWerkitemDetails(r)}</td></tr>`;
+  }
+
+  function tekenWerkitemDetails(r) {
+    if (!r.werkitemDetails.length) {
+      return '<p class="leeg-melding" style="margin:4px 0">Geen werkitems in deze periode.</p>';
+    }
+    const labels = App.pages.werkitems.TYPE_LABEL;
+    const rijen = r.werkitemDetails.map(w => `<tr>
+      <td>${App.ui.escapeHtml(w.titel)}</td>
+      <td>${labels[w.type] || w.type}</td>
+      <td>${rond(w.uren)}u</td>
+      <td>${App.ui.escapeHtml(w.status)}</td>
+    </tr>`).join('');
+    return `<table style="margin:4px 0">
+      <thead><tr><th>Werkitem</th><th>Type</th><th>Uren (deze periode)</th><th>Status</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
   }
 
   function rijTeam(t) {
