@@ -224,7 +224,6 @@ tr.niet-werkdag td:first-child, tr.niet-werkdag td:nth-child(2) { font-style: it
     <div class="veld"><label>Wachtwoord</label><input name="wachtwoord" type="password" autocomplete="current-password" required></div>
     <p id="loginFout" class="login-fout hidden">Onjuiste gebruikersnaam of wachtwoord.</p>
     <button type="submit" class="btn">Inloggen</button>
-    <p class="login-hint">Prototype-inlog: gebruikersnaam <strong>BT</strong>, wachtwoord <strong>BT</strong>.</p>
   </form>
 </div>
 
@@ -236,7 +235,6 @@ tr.niet-werkdag td:first-child, tr.niet-werkdag td:nth-child(2) { font-style: it
     </div>
     <nav id="mainNav" class="tabs">
       <button data-page="dashboard" class="tab active">Dashboard</button>
-      <button data-page="medewerkers" class="tab">Medewerkers</button>
       <button data-page="verlof" class="tab">Verlof</button>
       <button data-page="werkitems" class="tab">Capaciteitsplanning</button>
       <button data-page="projecten" class="tab">Projecten</button>
@@ -252,22 +250,61 @@ tr.niet-werkdag td:first-child, tr.niet-werkdag td:nth-child(2) { font-style: it
 <div id="toast" class="toast hidden"></div>
 
 <script>
-// Eenvoudig inlogscherm voor het prototype. LET OP: dit is client-side en dus geen
-// echte beveiliging (te omzeilen via devtools) - puur een toegangsscherm voor de demo.
+// Inlogscherm + rolrechten voor het prototype. LET OP: dit is client-side en dus geen
+// echte beveiliging (te omzeilen via devtools) - puur een toegangsscherm/demo van rollen.
 // Later te vervangen door echte authenticatie zonder de rest van de app te hoeven wijzigen.
 window.App = window.App || {};
 
 App.auth = (function () {
-  const GEBRUIKER = 'BT';
-  const WACHTWOORD = 'BT';
-  const SLEUTEL = 'btcp_ingelogd';
+  const SLEUTEL = 'btcp_gebruiker_id';
 
-  function isIngelogd() {
-    return sessionStorage.getItem(SLEUTEL) === 'ja';
+  // paginas: null = alle paginas. alleenLezen: geen enkele wijziging toegestaan.
+  const ROLRECHTEN = {
+    teamlead: {
+      paginas: null, alleenLezen: false, alleenEigenVerlof: false, magGoedkeuren: true
+    },
+    projectmanager: {
+      paginas: ['verlof', 'werkitems', 'projecten', 'verstoringen', 'rapportages'],
+      alleenLezen: false, alleenEigenVerlof: true, magGoedkeuren: false
+    },
+    teammember: {
+      paginas: ['verlof'], alleenLezen: false, alleenEigenVerlof: true, magGoedkeuren: false
+    },
+    viewer: {
+      paginas: ['dashboard', 'verlof', 'werkitems', 'projecten', 'verstoringen', 'rapportages'],
+      alleenLezen: true, alleenEigenVerlof: false, magGoedkeuren: false
+    }
+  };
+
+  function huidigeGebruiker() {
+    const id = sessionStorage.getItem(SLEUTEL);
+    if (!id) return null;
+    return App.data.gebruikers().find(g => g.id === id) || null;
   }
 
-  function controleer(gebruiker, wachtwoord) {
-    return gebruiker.trim().toUpperCase() === GEBRUIKER && wachtwoord.trim().toUpperCase() === WACHTWOORD;
+  function isIngelogd() {
+    return !!huidigeGebruiker();
+  }
+
+  function rechten() {
+    const g = huidigeGebruiker();
+    return (g && ROLRECHTEN[g.rol]) || ROLRECHTEN.viewer;
+  }
+
+  function magPagina(pagina) {
+    const p = rechten().paginas;
+    return p === null || p.includes(pagina);
+  }
+
+  function magBewerken() { return !rechten().alleenLezen; }
+  function magGoedkeuren() { return rechten().magGoedkeuren; }
+  function alleenEigenVerlof() { return rechten().alleenEigenVerlof; }
+  function eigenMedewerkerId() { const g = huidigeGebruiker(); return g ? g.medewerkerId : null; }
+
+  function controleer(gebruikersnaam, wachtwoord) {
+    return App.data.gebruikers().find(g =>
+      g.gebruikersnaam.trim().toUpperCase() === gebruikersnaam.trim().toUpperCase() &&
+      g.wachtwoord.trim().toUpperCase() === wachtwoord.trim().toUpperCase());
   }
 
   function uitloggen() {
@@ -290,8 +327,9 @@ App.auth = (function () {
     document.getElementById('loginForm').addEventListener('submit', e => {
       e.preventDefault();
       const form = e.target;
-      if (controleer(form.gebruiker.value, form.wachtwoord.value)) {
-        sessionStorage.setItem(SLEUTEL, 'ja');
+      const match = controleer(form.gebruiker.value, form.wachtwoord.value);
+      if (match) {
+        sessionStorage.setItem(SLEUTEL, match.id);
         toonApp();
         bijGeslaagd();
       } else {
@@ -312,7 +350,10 @@ App.auth = (function () {
     }
   }
 
-  return { isIngelogd, uitloggen, toonApp, toonLogin, init };
+  return {
+    isIngelogd, uitloggen, toonApp, toonLogin, init, huidigeGebruiker,
+    magPagina, magBewerken, magGoedkeuren, alleenEigenVerlof, eigenMedewerkerId, ROLRECHTEN
+  };
 })();
 </script>
 <script>
@@ -356,9 +397,10 @@ window.App = window.App || {};
 App.settings = (function () {
   const SLEUTEL = 'instellingen';
   const STANDAARD = {
-    oranjeGrens: 0.70,     // vanaf deze bezetting: "bijna vol"
-    roodGrens: 0.85,       // vanaf deze bezetting: "overbelast"
-    minimaleBezetting: 5   // minimum aantal aanwezige medewerkers per dag
+    oranjeGrens: 0.70,          // vanaf deze bezetting: "bijna vol"
+    roodGrens: 0.85,            // vanaf deze bezetting: "overbelast"
+    minimaleBezetting: 5,       // minimum totaal aantal aanwezige medewerkers per dag
+    minimaleBezettingPerRol: {} // { [rolnaam]: minimum aantal }, 0/ontbrekend = geen aparte eis
   };
 
   function get() {
@@ -382,6 +424,7 @@ App.settings = (function () {
 //               afhankelijkVan: [werkitemId] (alleen relevant voor type 'project'),
 //               oorspronkelijkeStartDatum, oorspronkelijkeEindDatum (snapshot bij aanmaken, voor 'Aangepaste planningen'),
 //               weekUren: { [weekKey]: { [medewerkerId]: uren } } (verplichte weekplanning) }
+// Gebruiker:  { id, gebruikersnaam, wachtwoord, rol: 'teamlead'|'projectmanager'|'teammember'|'viewer', medewerkerId }
 window.App = window.App || {};
 
 App.model = (function () {
@@ -389,6 +432,8 @@ App.model = (function () {
   const VERLOF_TYPES = ['afwezig', 'standby', 'anders', 'verzoek'];
   const DAGDELEN = ['hele-dag', 'ochtend', 'middag'];
   const STATUSSEN = ['gepland', 'lopend', 'afgerond', 'geannuleerd'];
+  const ROLLEN = ['teamlead', 'projectmanager', 'teammember', 'viewer'];
+  const ROL_LABEL = { teamlead: 'Teamlead', projectmanager: 'Project manager', teammember: 'Teammember', viewer: 'Viewer' };
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -418,7 +463,16 @@ App.model = (function () {
     return item;
   }
 
-  return { WERK_TYPES, VERLOF_TYPES, DAGDELEN, STATUSSEN, uid, nieuweMedewerker, nieuwVerlof, nieuwWerkitem };
+  function nieuweGebruiker(overrides) {
+    return Object.assign({
+      id: uid(), gebruikersnaam: '', wachtwoord: '', rol: 'teammember', medewerkerId: ''
+    }, overrides);
+  }
+
+  return {
+    WERK_TYPES, VERLOF_TYPES, DAGDELEN, STATUSSEN, ROLLEN, ROL_LABEL,
+    uid, nieuweMedewerker, nieuwVerlof, nieuwWerkitem, nieuweGebruiker
+  };
 })();
 
 App.data = (function () {
@@ -431,6 +485,9 @@ App.data = (function () {
   function werkitems() { return App.storage.laad('werkitems', []); }
   function bewaarWerkitems(lijst) { App.storage.bewaar('werkitems', lijst); }
 
+  function gebruikers() { return App.storage.laad('gebruikers', []); }
+  function bewaarGebruikers(lijst) { App.storage.bewaar('gebruikers', lijst); }
+
   function upsert(lijst, item) {
     const idx = lijst.findIndex(x => x.id === item.id);
     if (idx >= 0) lijst[idx] = item; else lijst.push(item);
@@ -441,11 +498,18 @@ App.data = (function () {
     return lijst.filter(x => x.id !== id);
   }
 
+  function goedkeurenVerzoek(ids) {
+    const lijst = verlof();
+    lijst.forEach(v => { if (ids.includes(v.id)) v.type = 'afwezig'; });
+    bewaarVerlof(lijst);
+  }
+
   return {
     medewerkers, bewaarMedewerkers,
     verlof, bewaarVerlof,
     werkitems, bewaarWerkitems,
-    upsert, verwijder
+    gebruikers, bewaarGebruikers,
+    upsert, verwijder, goedkeurenVerzoek
   };
 })();
 
@@ -504,6 +568,25 @@ App.seed = function seedData() {
   App.data.bewaarVerlof(verlof);
   App.data.bewaarWerkitems(werkitems);
   App.storage.markeerGeinitialiseerd();
+};
+
+// Los van App.seed (die alleen bij een lege installatie draait): zorgt dat er altijd
+// standaard gebruikersaccounts bestaan, ook als medewerkers/verlof/werkitems al gevuld waren.
+App.seedGebruikers = function seedGebruikers() {
+  if (App.storage.laad('gebruikersGeinitialiseerd', false)) return;
+
+  const medewerkers = App.data.medewerkers();
+  const idVan = naam => { const m = medewerkers.find(x => x.naam === naam); return m ? m.id : ''; };
+
+  const gebruikers = [
+    App.model.nieuweGebruiker({ gebruikersnaam: 'Teamlead', wachtwoord: 'Teamlead', rol: 'teamlead', medewerkerId: idVan('Boudewijn') }),
+    App.model.nieuweGebruiker({ gebruikersnaam: 'Projectmanager', wachtwoord: 'Projectmanager', rol: 'projectmanager', medewerkerId: idVan('Jari') }),
+    App.model.nieuweGebruiker({ gebruikersnaam: 'Teammember', wachtwoord: 'Teammember', rol: 'teammember', medewerkerId: idVan('Jesse') }),
+    App.model.nieuweGebruiker({ gebruikersnaam: 'Viewer', wachtwoord: 'Viewer', rol: 'viewer', medewerkerId: '' })
+  ];
+
+  App.data.bewaarGebruikers(gebruikers);
+  App.storage.bewaar('gebruikersGeinitialiseerd', true);
 };
 </script>
 <script>
@@ -980,16 +1063,18 @@ App.pages.verlof = (function () {
 
   function render(container) {
     const medewerkers = App.data.medewerkers();
+    const magBewerken = App.auth.magBewerken();
 
     container.innerHTML = `
       <h2>Verlofplanning</h2>
+      ${!magBewerken ? '<p class="leeg-melding">Je hebt alleen-lezen toegang; wijzigen is niet mogelijk.</p>' : `
       <div class="grid-2">
         <div class="card">
           <h3 id="formTitel">Verlof/standby toevoegen</h3>
           <form id="verlofForm">
             <div class="veld">
               <label>Medewerker</label>
-              <select name="medewerkerId" required>${optiesMedewerkers(medewerkers)}</select>
+              <select name="medewerkerId" required ${App.auth.alleenEigenVerlof() ? 'disabled' : ''}>${optiesMedewerkers(medewerkers)}</select>
             </div>
             <div class="rij">
               <div class="veld"><label>Datum (of startdatum periode)</label><input type="date" name="startDatum" required></div>
@@ -1025,7 +1110,7 @@ App.pages.verlof = (function () {
           <form id="terugkerendForm">
             <div class="veld">
               <label>Medewerker</label>
-              <select name="medewerkerId" required>${optiesMedewerkers(medewerkers)}</select>
+              <select name="medewerkerId" required ${App.auth.alleenEigenVerlof() ? 'disabled' : ''}>${optiesMedewerkers(medewerkers)}</select>
             </div>
             <div class="rij">
               <div class="veld"><label>Weekdag</label>
@@ -1062,6 +1147,7 @@ App.pages.verlof = (function () {
           </form>
         </div>
       </div>
+      `}
 
       <div class="card">
         <div class="toolbar">
@@ -1114,15 +1200,21 @@ App.pages.verlof = (function () {
     document.getElementById('matrixWekenSelect').value = matrixWekenVooruit;
     tekenMatrix();
     tekenLijst();
-    document.getElementById('verlofForm').addEventListener('submit', opSlaan);
-    document.getElementById('annuleerBtn').addEventListener('click', resetForm);
-    document.getElementById('terugkerendForm').addEventListener('submit', voegTerugkerendToe);
-    document.getElementById('annuleerTerugkerendBtn').addEventListener('click', resetTerugkerendForm);
+    if (magBewerken) {
+      document.getElementById('verlofForm').addEventListener('submit', opSlaan);
+      document.getElementById('annuleerBtn').addEventListener('click', resetForm);
+      document.getElementById('terugkerendForm').addEventListener('submit', voegTerugkerendToe);
+      document.getElementById('annuleerTerugkerendBtn').addEventListener('click', resetTerugkerendForm);
+    }
     document.getElementById('matrixWekenSelect').addEventListener('change', e => { matrixWekenVooruit = Number(e.target.value); tekenMatrix(); });
     document.getElementById('filterMedewerker').addEventListener('change', e => { filterMedewerkerId = e.target.value; tekenLijst(); });
   }
 
   function optiesMedewerkers(medewerkers) {
+    if (App.auth.alleenEigenVerlof()) {
+      const eigen = medewerkers.find(m => m.id === App.auth.eigenMedewerkerId());
+      return eigen ? `<option value="${eigen.id}">${App.ui.escapeHtml(eigen.naam)}</option>` : '<option value="">Geen gekoppelde medewerker</option>';
+    }
     if (!medewerkers.length) return '<option value="">Eerst een medewerker aanmaken</option>';
     return medewerkers.map(m => `<option value="${m.id}">${App.ui.escapeHtml(m.naam)}</option>`).join('');
   }
@@ -1287,19 +1379,26 @@ App.pages.verlof = (function () {
       tbody.innerHTML = '<tr><td colspan="5" class="leeg-melding">Geen verlof gevonden.</td></tr>';
       return;
     }
-    tbody.innerHTML = groepen.map((g, idx) => `
+    const magBewerken = App.auth.magBewerken();
+    const alleenEigen = App.auth.alleenEigenVerlof();
+    const eigenId = App.auth.eigenMedewerkerId();
+
+    tbody.innerHTML = groepen.map((g, idx) => {
+      const magDezeBewerken = magBewerken && (!alleenEigen || g.medewerkerId === eigenId);
+      return `
       <tr data-bevat-ids="${g.ids.join(' ')}">
         <td>${App.ui.escapeHtml(naamVan(g.medewerkerId))}</td>
         <td>${periodeTekst(g)}</td>
         <td>${typeBadge(g.type, g.opmerking, g.dagdeel)}</td>
         <td>${App.ui.escapeHtml(g.opmerking)}</td>
         <td>
-          ${g.type === 'verzoek' ? `<button class="btn klein" data-actie="goedkeuren" data-idx="${idx}">Goedkeuren</button>` : ''}
-          <button class="btn secundair klein" data-actie="wijzig" data-idx="${idx}">Wijzig</button>
-          <button class="btn gevaar klein" data-actie="verwijder" data-idx="${idx}">Verwijder${g.herhalend ? ' reeks' : ''}</button>
+          ${g.type === 'verzoek' && App.auth.magGoedkeuren() ? `<button class="btn klein" data-actie="goedkeuren" data-idx="${idx}">Goedkeuren</button>` : ''}
+          ${magDezeBewerken ? `<button class="btn secundair klein" data-actie="wijzig" data-idx="${idx}">Wijzig</button>` : ''}
+          ${magDezeBewerken ? `<button class="btn gevaar klein" data-actie="verwijder" data-idx="${idx}">Verwijder${g.herhalend ? ' reeks' : ''}</button>` : ''}
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     tbody.querySelectorAll('[data-actie="wijzig"]').forEach(b => b.addEventListener('click', () => {
       const groep = groepen[Number(b.dataset.idx)];
@@ -1451,8 +1550,10 @@ App.pages.werkitems = (function () {
 
   function render(container) {
     const medewerkers = App.data.medewerkers();
+    const magBewerken = App.auth.magBewerken();
     container.innerHTML = `
       <h2>Capaciteitsplanning</h2>
+      ${!magBewerken ? '<p class="leeg-melding">Je hebt alleen-lezen toegang; wijzigen is niet mogelijk.</p>' : `
       <div class="card">
         <h3 id="formTitel">Nieuw werkitem</h3>
         <form id="werkitemForm">
@@ -1498,6 +1599,7 @@ App.pages.werkitems = (function () {
           <button type="button" id="annuleerBtn" class="btn secundair" style="display:none">Annuleren</button>
         </form>
       </div>
+      `}
       <div class="card">
         <div class="tabel-wrap">
           <table>
@@ -1512,10 +1614,12 @@ App.pages.werkitems = (function () {
     `;
 
     vulTabel();
-    tekenWeekplanning({}, []);
-    document.getElementById('werkitemForm').addEventListener('submit', opSlaan);
-    document.getElementById('annuleerBtn').addEventListener('click', resetForm);
-    document.getElementById('genereerWeekBtn').addEventListener('click', genereerWeekplanning);
+    if (magBewerken) {
+      tekenWeekplanning({}, []);
+      document.getElementById('werkitemForm').addEventListener('submit', opSlaan);
+      document.getElementById('annuleerBtn').addEventListener('click', resetForm);
+      document.getElementById('genereerWeekBtn').addEventListener('click', genereerWeekplanning);
+    }
   }
 
   function genereerWeekplanning() {
@@ -1619,8 +1723,8 @@ App.pages.werkitems = (function () {
         <td>${App.ui.escapeHtml(w.waardestroom)}</td>
         <td>${App.ui.escapeHtml(w.status)}</td>
         <td>
-          <button class="btn secundair klein" data-actie="wijzig" data-id="${w.id}">Wijzig</button>
-          <button class="btn gevaar klein" data-actie="verwijder" data-id="${w.id}">Verwijder</button>
+          ${App.auth.magBewerken() ? `<button class="btn secundair klein" data-actie="wijzig" data-id="${w.id}">Wijzig</button>
+          <button class="btn gevaar klein" data-actie="verwijder" data-id="${w.id}">Verwijder</button>` : ''}
         </td>
       </tr>
     `).join('');
@@ -1823,7 +1927,7 @@ App.pages.projecten = (function () {
       ? conflicten.map(c => `
         <div class="card" style="border-color:var(--rood);background:var(--rood-bg)">
           <strong>${App.ui.escapeHtml(c.item.titel)}</strong> kan niet starten op ${c.item.startDatum} — een afhankelijkheid loopt door tot na de geplande start.
-          <button class="btn gevaar klein" data-doorschuiven="${c.item.id}" data-nieuwe-start="${App.datum.naarIso(c.nieuweStart)}" style="margin-left:8px">Doorschuiven naar ${App.datum.formatKort(c.nieuweStart)}</button>
+          ${App.auth.magBewerken() ? `<button class="btn gevaar klein" data-doorschuiven="${c.item.id}" data-nieuwe-start="${App.datum.naarIso(c.nieuweStart)}" style="margin-left:8px">Doorschuiven naar ${App.datum.formatKort(c.nieuweStart)}</button>` : ''}
         </div>
       `).join('')
       : '';
@@ -1904,6 +2008,8 @@ App.pages.dashboard = (function () {
   let splitsPerFunctie = false;
   let aantalWekenVooruit = 8;
   let uitgeklapt = new Set();
+  let bezettingRefDatum = new Date();
+  let bezettingUitgeklapt = new Set();
 
   function render(container) {
     container.innerHTML = `
@@ -1967,7 +2073,15 @@ App.pages.dashboard = (function () {
       </div>
 
       <div class="card">
-        <h3>Bezetting deze week</h3>
+        <div class="toolbar">
+          <h3 style="margin:0">Bezetting</h3>
+          <div class="rij" style="margin:0;align-items:center">
+            <button class="btn secundair klein" id="bezettingVorigeBtn">&larr;</button>
+            <strong id="bezettingWeekLabel"></strong>
+            <button class="btn secundair klein" id="bezettingVolgendeBtn">&rarr;</button>
+            <div class="veld" style="margin:0"><label>Zoek week met datum</label><input type="date" id="bezettingDatumInput" value="${App.datum.naarIso(bezettingRefDatum)}"></div>
+          </div>
+        </div>
         ${tekenBezetting(medewerkers, verlof)}
       </div>
 
@@ -2034,41 +2148,92 @@ App.pages.dashboard = (function () {
       if (uitgeklapt.has(id)) uitgeklapt.delete(id); else uitgeklapt.add(id);
       tekenInhoud();
     }));
+
+    const bezettingBereik = App.datum.periodeBereik('week', bezettingRefDatum);
+    document.getElementById('bezettingWeekLabel').textContent = bezettingBereik.label;
+    document.getElementById('bezettingVorigeBtn').addEventListener('click', () => {
+      const d = new Date(bezettingRefDatum.getTime()); d.setDate(d.getDate() - 7); bezettingRefDatum = d; tekenInhoud();
+    });
+    document.getElementById('bezettingVolgendeBtn').addEventListener('click', () => {
+      const d = new Date(bezettingRefDatum.getTime()); d.setDate(d.getDate() + 7); bezettingRefDatum = d; tekenInhoud();
+    });
+    document.getElementById('bezettingDatumInput').addEventListener('change', e => {
+      if (e.target.value) { bezettingRefDatum = App.datum.parseIso(e.target.value); tekenInhoud(); }
+    });
+    document.querySelectorAll('[data-toggle-dag]').forEach(b => b.addEventListener('click', () => {
+      const iso = b.dataset.toggleDag;
+      if (bezettingUitgeklapt.has(iso)) bezettingUitgeklapt.delete(iso); else bezettingUitgeklapt.add(iso);
+      tekenInhoud();
+    }));
+    document.querySelectorAll('[data-goedkeuren-verzoek]').forEach(b => b.addEventListener('click', () => {
+      App.data.goedkeurenVerzoek([b.dataset.goedkeurenVerzoek]);
+      App.ui.melding('Verzoek goedgekeurd en omgezet naar Afwezig');
+      tekenInhoud();
+    }));
   }
 
   function tekenBezetting(medewerkers, verlof) {
     const instellingen = App.settings.get();
-    const weekBereik = App.datum.periodeBereik('week', refDatum);
+    const magGoedkeuren = App.auth.magGoedkeuren();
+    const weekBereik = App.datum.periodeBereik('week', bezettingRefDatum);
     const dagen = App.datum.werkdagenTussen(weekBereik.start, weekBereik.eind);
     const totaal = medewerkers.length;
+    const naamVan = id => (medewerkers.find(m => m.id === id) || {}).naam || 'Onbekend';
 
     const rijen = dagen.map(dag => {
       const iso = App.datum.naarIso(dag);
-      let aanwezig = 0, verzoeken = 0;
+      let aanwezig = 0;
+      const verzoeken = [];
+      const perRol = {};
       medewerkers.forEach(m => {
+        const rol = m.rol || 'Onbekend';
+        if (!perRol[rol]) perRol[rol] = { aanwezig: 0, totaal: 0 };
+        perRol[rol].totaal++;
+
         const entries = verlof.filter(v => v.medewerkerId === m.id && v.datum === iso);
         const heleDagAfwezig = entries.some(v => (v.type === 'afwezig' || v.type === 'anders') && (!v.dagdeel || v.dagdeel === 'hele-dag'));
-        if (!heleDagAfwezig) aanwezig++;
-        if (entries.some(v => v.type === 'verzoek')) verzoeken++;
+        if (!heleDagAfwezig) { aanwezig++; perRol[rol].aanwezig++; }
+        entries.filter(v => v.type === 'verzoek').forEach(v => verzoeken.push({ id: v.id, medewerkerId: m.id, naam: naamVan(m.id) }));
       });
-      return { dag, aanwezig, verzoeken, bijGoedkeuring: Math.max(0, aanwezig - verzoeken) };
+      return { dag, iso, aanwezig, perRol, verzoeken, bijGoedkeuring: Math.max(0, aanwezig - verzoeken.length) };
     });
 
-    const header = '<tr><th>Dag</th><th>Datum</th><th>Aanwezig</th><th>Open verzoeken</th><th>Bij goedkeuring</th></tr>';
+    const rolDrempelOverschreden = r => Object.entries(r.perRol).some(([rol, v]) =>
+      (instellingen.minimaleBezettingPerRol[rol] || 0) > 0 && v.aanwezig < instellingen.minimaleBezettingPerRol[rol]);
+
+    const header = '<tr><th></th><th>Dag</th><th>Datum</th><th>Aanwezig</th><th>Open verzoeken</th><th>Bij goedkeuring</th></tr>';
     const lichaam = rijen.map(r => {
-      const onderMinimum = r.aanwezig < instellingen.minimaleBezetting;
-      const risicoBijGoedkeuring = r.verzoeken > 0 && r.bijGoedkeuring < instellingen.minimaleBezetting;
-      return `<tr${onderMinimum ? ' style="background:var(--rood-bg)"' : ''}>
+      const onderMinimum = r.aanwezig < instellingen.minimaleBezetting || rolDrempelOverschreden(r);
+      const risicoBijGoedkeuring = r.verzoeken.length > 0 && r.bijGoedkeuring < instellingen.minimaleBezetting;
+      const isOpen = bezettingUitgeklapt.has(r.iso);
+      const hoofdRij = `<tr${onderMinimum ? ' style="background:var(--rood-bg)"' : ''}>
+        <td><button type="button" class="btn secundair klein" data-toggle-dag="${r.iso}">${isOpen ? '▾' : '▸'}</button></td>
         <td>${App.datum.DAGEN_KORT[r.dag.getDay()]}</td>
         <td>${App.datum.formatKort(r.dag)}</td>
         <td><strong style="color:${onderMinimum ? 'var(--rood)' : 'inherit'}">${r.aanwezig} / ${totaal}</strong></td>
-        <td>${r.verzoeken > 0 ? `<span class="badge verzoek">${r.verzoeken} open</span>` : '-'}</td>
-        <td>${r.verzoeken > 0 ? `<strong style="color:${risicoBijGoedkeuring ? 'var(--rood)' : 'inherit'}">${r.bijGoedkeuring} / ${totaal}</strong>${risicoBijGoedkeuring ? ' &#9888;' : ''}` : '-'}</td>
+        <td>${r.verzoeken.length > 0 ? `<span class="badge verzoek">${r.verzoeken.length} open</span>` : '-'}</td>
+        <td>${r.verzoeken.length > 0 ? `<strong style="color:${risicoBijGoedkeuring ? 'var(--rood)' : 'inherit'}">${r.bijGoedkeuring} / ${totaal}</strong>${risicoBijGoedkeuring ? ' &#9888;' : ''}` : '-'}</td>
       </tr>`;
+      if (!isOpen) return hoofdRij;
+      return hoofdRij + `<tr><td colspan="6" style="background:var(--grijs-bg)">${tekenDagDetail(r, magGoedkeuren)}</td></tr>`;
     }).join('');
 
-    return `<p style="font-size:13px;color:#6b7280">Minimale bezetting: ${instellingen.minimaleBezetting} medewerkers (instelbaar bij Instellingen). Medewerkers met verlof tellen niet mee; open verzoeken worden apart getoond zodat je de impact van goedkeuring kunt inschatten.</p>
-      <div class="tabel-wrap"><table><thead>${header}</thead><tbody>${lichaam || '<tr><td colspan="5" class="leeg-melding">Geen werkdagen deze week.</td></tr>'}</tbody></table></div>`;
+    return `<p style="font-size:13px;color:#6b7280">Minimale bezetting: ${instellingen.minimaleBezetting} medewerkers totaal (en eventueel per rol) — instelbaar bij Instellingen. Medewerkers met verlof (hele dag) tellen niet mee; open verzoeken worden apart getoond zodat je de impact van goedkeuring kunt inschatten. Klik op een dag om de bezetting per rol te zien.</p>
+      <div class="tabel-wrap"><table><thead>${header}</thead><tbody>${lichaam || '<tr><td colspan="6" class="leeg-melding">Geen werkdagen deze week.</td></tr>'}</tbody></table></div>`;
+  }
+
+  function tekenDagDetail(r, magGoedkeuren) {
+    const rolRijen = Object.entries(r.perRol).map(([rol, v]) => `<tr>
+      <td>${App.ui.escapeHtml(rol)}</td><td>${v.aanwezig} / ${v.totaal}</td>
+    </tr>`).join('');
+    const rolTabel = `<table style="margin:4px 0 12px 0"><thead><tr><th>Rol</th><th>Aanwezig</th></tr></thead><tbody>${rolRijen}</tbody></table>`;
+
+    if (!r.verzoeken.length) return rolTabel;
+    const verzoekRijen = r.verzoeken.map(v => `<tr>
+      <td>${App.ui.escapeHtml(v.naam)}</td>
+      <td>${magGoedkeuren ? `<button type="button" class="btn klein" data-goedkeuren-verzoek="${v.id}">Goedkeuren</button>` : '<span class="leeg-melding">Geen rechten om goed te keuren</span>'}</td>
+    </tr>`).join('');
+    return rolTabel + `<strong>Openstaande verzoeken</strong><table style="margin:4px 0"><thead><tr><th>Medewerker</th><th></th></tr></thead><tbody>${verzoekRijen}</tbody></table>`;
   }
 
   function tekenVooruitblik(medewerkers, werkitems, verlof) {
@@ -2195,8 +2360,10 @@ App.pages.verstoringen = (function () {
   function render(container) {
     const medewerkers = App.data.medewerkers();
     const vandaag = App.datum.naarIso(new Date());
+    const magBewerken = App.auth.magBewerken();
     container.innerHTML = `
       <h2>Impact van verstoringen</h2>
+      ${!magBewerken ? '<p class="leeg-melding">Je hebt alleen-lezen toegang; wijzigen is niet mogelijk.</p>' : `
       <div class="card">
         <h3>Incident / ad-hoc werk toevoegen</h3>
         <form id="incidentForm">
@@ -2220,6 +2387,7 @@ App.pages.verstoringen = (function () {
           <button type="submit" class="btn gevaar">Toevoegen en impact tonen</button>
         </form>
       </div>
+      `}
 
       <div id="impactResultaat"></div>
 
@@ -2235,7 +2403,7 @@ App.pages.verstoringen = (function () {
     `;
 
     vulIncidentLijst();
-    document.getElementById('incidentForm').addEventListener('submit', voegToe);
+    if (magBewerken) document.getElementById('incidentForm').addEventListener('submit', voegToe);
   }
 
   function totaalUren(w) {
@@ -2259,7 +2427,7 @@ App.pages.verstoringen = (function () {
         <td>${totaalUren(w)}</td>
         <td>${w.medewerkerIds.map(id => App.ui.escapeHtml(naamVan(id))).join(', ')}</td>
         <td>${App.ui.escapeHtml(w.prioriteit)}</td>
-        <td><button class="btn gevaar klein" data-id="${w.id}">Verwijder</button></td>
+        <td>${App.auth.magBewerken() ? `<button class="btn gevaar klein" data-id="${w.id}">Verwijder</button>` : ''}</td>
       </tr>
     `).join('');
     tbody.querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => {
@@ -2586,14 +2754,44 @@ App.pages.rapportages = (function () {
 })();
 </script>
 <script>
-// Pagina: Instellingen (grenswaarden voor dashboard en bezetting)
+// Pagina: Instellingen (drempels, medewerkers, gebruikers) - alleen bereikbaar voor teamlead
 window.App = window.App || {};
 
 App.pages.instellingen = (function () {
+  let subtab = 'drempels';
+  let bewerkGebruikerId = null;
+
   function render(container) {
-    const s = App.settings.get();
     container.innerHTML = `
       <h2>Instellingen</h2>
+      <nav class="tabs" style="margin-bottom:16px">
+        <button class="tab ${subtab === 'drempels' ? 'active' : ''}" data-subtab="drempels">Drempels</button>
+        <button class="tab ${subtab === 'medewerkers' ? 'active' : ''}" data-subtab="medewerkers">Medewerkers</button>
+        <button class="tab ${subtab === 'gebruikers' ? 'active' : ''}" data-subtab="gebruikers">Gebruikers</button>
+      </nav>
+      <div id="instellingenInhoud"></div>
+    `;
+
+    container.querySelectorAll('[data-subtab]').forEach(b => b.addEventListener('click', () => {
+      subtab = b.dataset.subtab;
+      render(container);
+    }));
+
+    tekenSubtab();
+  }
+
+  function tekenSubtab() {
+    const inhoud = document.getElementById('instellingenInhoud');
+    if (subtab === 'medewerkers') { App.pages.medewerkers.render(inhoud); return; }
+    if (subtab === 'gebruikers') { tekenGebruikers(inhoud); return; }
+    tekenDrempels(inhoud);
+  }
+
+  function tekenDrempels(container) {
+    const s = App.settings.get();
+    const rollen = [...new Set(App.data.medewerkers().map(m => m.rol).filter(Boolean))];
+
+    container.innerHTML = `
       <div class="card">
         <h3>Bezetting per medewerker (Dashboard)</h3>
         <p style="font-size:13px;color:#6b7280">Vanaf welke bezetting geldt een medewerker als "bijna vol" (oranje) of "overbelast" (rood)?</p>
@@ -2608,9 +2806,13 @@ App.pages.instellingen = (function () {
 
       <div class="card">
         <h3>Minimale bezetting (Dashboard)</h3>
-        <p style="font-size:13px;color:#6b7280">Minimum aantal medewerkers dat per dag aanwezig moet zijn. Een dag met minder aanwezige medewerkers wordt rood gemarkeerd in het bezettingsoverzicht.</p>
+        <p style="font-size:13px;color:#6b7280">Minimum aantal medewerkers dat per dag aanwezig moet zijn. Een dag met minder aanwezige medewerkers (totaal, of voor een specifieke rol) wordt rood gemarkeerd in het bezettingsoverzicht.</p>
         <form id="bezettingForm">
-          <div class="veld"><label>Minimale bezetting (aantal medewerkers)</label><input type="number" name="minimaleBezetting" min="0" step="1" value="${s.minimaleBezetting}" required></div>
+          <div class="veld"><label>Minimale bezetting totaal (aantal medewerkers)</label><input type="number" name="minimaleBezetting" min="0" step="1" value="${s.minimaleBezetting}" required></div>
+          ${rollen.length ? `<h4 style="margin-bottom:6px">Per rol (0 = geen aparte eis)</h4>
+          <div class="rij">
+            ${rollen.map(rol => `<div class="veld"><label>${App.ui.escapeHtml(rol)}</label><input type="number" name="rol__${App.ui.escapeHtml(rol)}" min="0" step="1" value="${s.minimaleBezettingPerRol[rol] || 0}"></div>`).join('')}
+          </div>` : ''}
           <button type="submit" class="btn">Opslaan</button>
         </form>
       </div>
@@ -2636,8 +2838,121 @@ App.pages.instellingen = (function () {
   function opslaanBezetting(e) {
     e.preventDefault();
     const form = e.target;
-    App.settings.bewaar(Object.assign({}, App.settings.get(), { minimaleBezetting: Number(form.minimaleBezetting.value) || 0 }));
+    const minimaleBezettingPerRol = {};
+    [...form.elements].forEach(el => {
+      if (el.name && el.name.startsWith('rol__')) {
+        minimaleBezettingPerRol[el.name.slice(5)] = Number(el.value) || 0;
+      }
+    });
+    App.settings.bewaar(Object.assign({}, App.settings.get(), {
+      minimaleBezetting: Number(form.minimaleBezetting.value) || 0,
+      minimaleBezettingPerRol
+    }));
     App.ui.melding('Minimale bezetting opgeslagen');
+  }
+
+  function tekenGebruikers(container) {
+    const medewerkers = App.data.medewerkers();
+    const gebruikers = App.data.gebruikers();
+    const optiesRol = App.model.ROLLEN.map(r => `<option value="${r}">${App.model.ROL_LABEL[r]}</option>`).join('');
+    const optiesMedewerker = '<option value="">Geen koppeling</option>' + medewerkers.map(m => `<option value="${m.id}">${App.ui.escapeHtml(m.naam)}</option>`).join('');
+    const naamVan = id => (medewerkers.find(m => m.id === id) || {}).naam || '-';
+
+    container.innerHTML = `
+      <div class="card">
+        <h3 id="gebruikerFormTitel">Nieuwe gebruiker</h3>
+        <form id="gebruikerForm">
+          <div class="rij">
+            <div class="veld"><label>Gebruikersnaam</label><input name="gebruikersnaam" required></div>
+            <div class="veld"><label>Wachtwoord</label><input name="wachtwoord" required></div>
+          </div>
+          <div class="rij">
+            <div class="veld"><label>Rol</label><select name="rol">${optiesRol}</select></div>
+            <div class="veld"><label>Gekoppelde medewerker</label><select name="medewerkerId">${optiesMedewerker}</select></div>
+          </div>
+          <button type="submit" class="btn">Opslaan</button>
+          <button type="button" id="annuleerGebruikerBtn" class="btn secundair" style="display:none">Annuleren</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="tabel-wrap">
+          <table>
+            <thead><tr><th>Gebruikersnaam</th><th>Rol</th><th>Gekoppelde medewerker</th><th></th></tr></thead>
+            <tbody>${gebruikers.map((g, idx) => `
+              <tr>
+                <td>${App.ui.escapeHtml(g.gebruikersnaam)}</td>
+                <td>${App.model.ROL_LABEL[g.rol] || g.rol}</td>
+                <td>${App.ui.escapeHtml(naamVan(g.medewerkerId))}</td>
+                <td>
+                  <button class="btn secundair klein" data-actie="wijzig" data-idx="${idx}">Wijzig</button>
+                  <button class="btn gevaar klein" data-actie="verwijder" data-idx="${idx}">Verwijder</button>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="4" class="leeg-melding">Nog geen gebruikers.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('gebruikerForm').addEventListener('submit', opslaanGebruiker);
+    document.getElementById('annuleerGebruikerBtn').addEventListener('click', resetGebruikerForm);
+    document.querySelectorAll('[data-actie="wijzig"]').forEach(b => b.addEventListener('click', () => beginWijzigGebruiker(gebruikers[Number(b.dataset.idx)])));
+    document.querySelectorAll('[data-actie="verwijder"]').forEach(b => b.addEventListener('click', () => verwijderGebruiker(gebruikers[Number(b.dataset.idx)])));
+  }
+
+  function beginWijzigGebruiker(g) {
+    bewerkGebruikerId = g.id;
+    const form = document.getElementById('gebruikerForm');
+    form.gebruikersnaam.value = g.gebruikersnaam;
+    form.wachtwoord.value = g.wachtwoord;
+    form.rol.value = g.rol;
+    form.medewerkerId.value = g.medewerkerId || '';
+    document.getElementById('gebruikerFormTitel').textContent = 'Gebruiker wijzigen';
+    document.getElementById('annuleerGebruikerBtn').style.display = 'inline-block';
+    form.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function resetGebruikerForm() {
+    bewerkGebruikerId = null;
+    const inhoud = document.getElementById('instellingenInhoud');
+    if (inhoud) tekenGebruikers(inhoud);
+  }
+
+  function opslaanGebruiker(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+      gebruikersnaam: form.gebruikersnaam.value.trim(),
+      wachtwoord: form.wachtwoord.value.trim(),
+      rol: form.rol.value,
+      medewerkerId: form.medewerkerId.value
+    };
+    if (!data.gebruikersnaam || !data.wachtwoord) return;
+
+    const lijst = App.data.gebruikers();
+    const bestaandeNaam = lijst.find(g => g.gebruikersnaam.toLowerCase() === data.gebruikersnaam.toLowerCase() && g.id !== bewerkGebruikerId);
+    if (bestaandeNaam) {
+      App.ui.melding('Deze gebruikersnaam bestaat al');
+      return;
+    }
+
+    if (bewerkGebruikerId) {
+      App.data.upsert(lijst, Object.assign({ id: bewerkGebruikerId }, data));
+      App.ui.melding('Gebruiker gewijzigd');
+    } else {
+      App.data.upsert(lijst, App.model.nieuweGebruiker(data));
+      App.ui.melding('Gebruiker toegevoegd');
+    }
+    App.data.bewaarGebruikers(lijst);
+    bewerkGebruikerId = null;
+    tekenGebruikers(document.getElementById('instellingenInhoud'));
+  }
+
+  function verwijderGebruiker(g) {
+    if (!confirm(`Gebruiker "${g.gebruikersnaam}" verwijderen?`)) return;
+    App.data.bewaarGebruikers(App.data.verwijder(App.data.gebruikers(), g.id));
+    App.ui.melding('Gebruiker verwijderd');
+    tekenGebruikers(document.getElementById('instellingenInhoud'));
   }
 
   return { render };
@@ -2650,8 +2965,13 @@ App.pages = App.pages || {};
 
 (function () {
   const container = document.getElementById('pageContent');
+  const PAGINA_VOLGORDE = ['dashboard', 'verlof', 'werkitems', 'projecten', 'verstoringen', 'rapportages', 'instellingen'];
 
   function render(pagina) {
+    if (!App.auth.magPagina(pagina)) {
+      container.innerHTML = '<p class="leeg-melding">Geen toegang tot deze pagina.</p>';
+      return;
+    }
     document.querySelectorAll('.tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.page === pagina);
     });
@@ -2663,6 +2983,12 @@ App.pages = App.pages || {};
     }
   }
 
+  function pasNavigatieAan() {
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.style.display = App.auth.magPagina(btn.dataset.page) ? '' : 'none';
+    });
+  }
+
   document.getElementById('mainNav').addEventListener('click', e => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
@@ -2671,7 +2997,12 @@ App.pages = App.pages || {};
 
   document.addEventListener('DOMContentLoaded', () => {
     App.seed();
-    App.auth.init(() => render('dashboard'));
+    App.seedGebruikers();
+    App.auth.init(() => {
+      pasNavigatieAan();
+      const eerstePagina = PAGINA_VOLGORDE.find(p => App.auth.magPagina(p)) || 'verlof';
+      render(eerstePagina);
+    });
   });
 })();
 </script>
