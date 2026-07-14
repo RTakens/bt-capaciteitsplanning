@@ -35,7 +35,7 @@ App.pages.standby = (function () {
     wrap.innerHTML = `
       <div class="card">
         <h3>Rooster genereren</h3>
-        <p style="font-size:13px;color:#6b7280">Verdeelt de standby-diensten automatisch over de medewerkers die bij Instellingen &gt; Medewerkers als standby-medewerker zijn gemarkeerd: altijd precies 1 persoon per week, iedereen (zo goed als) evenveel diensten, en de diensten van één persoon zo ver mogelijk uit elkaar. Overschrijft bestaande diensten in de gekozen periode.</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Verdeelt de standby-diensten automatisch over de medewerkers die bij Instellingen &gt; Medewerkers als standby-medewerker zijn gemarkeerd: altijd precies 1 persoon per week, iedereen (zo goed als) evenveel diensten, en de diensten van één persoon zo ver mogelijk uit elkaar. Houdt rekening met bestaand verlof (afwezig/verzoek) — iemand met verlof die week wordt overgeslagen. Terugkerend verlof wordt zoveel mogelijk vermeden, maar mag worden overschreden als niemand anders beschikbaar is. Overschrijft bestaande diensten in de gekozen periode.</p>
         <form id="genereerForm">
           <div class="rij">
             <div class="veld"><label>Startweek (datum in die week)</label><input type="date" name="startDatum" value="${standaardStart}" required></div>
@@ -110,11 +110,35 @@ App.pages.standby = (function () {
     App.data.bewaarStandbyVerzoeken(App.data.standbyVerzoeken().filter(v =>
       !teVerwijderenIds.has(v.dienstId) && !teVerwijderenIds.has(v.ruilDienstId)));
 
-    weekKeys.forEach((weekKey, i) => {
-      const medewerker = eligible[i % eligible.length];
-      const dienst = App.model.nieuweStandbyDienst({ weekKey, medewerkerId: medewerker.id });
+    // Houdt rekening met bestaand verlof (afwezig/verzoek): iemand met zo'n verlof die week wordt overgeslagen.
+    // Terugkerend verlof telt alleen mee als niemand anders beschikbaar is (mag dan overschreden worden).
+    // Eerlijkheid (aantal diensten, spreiding) blijft leidend via de sortering per week.
+    function heeftVerlofConflict(medewerkerId, maandag, zondag, negeerHerhalend) {
+      return App.datum.werkdagenTussen(maandag, zondag).some(dag => {
+        const iso = App.datum.naarIso(dag);
+        return verlof.some(v => v.medewerkerId === medewerkerId && v.datum === iso &&
+          (v.type === 'afwezig' || v.type === 'verzoek') && !(negeerHerhalend && v.herhalend));
+      });
+    }
+
+    const telling = {}, laatsteWeekIndex = {};
+    eligible.forEach(m => { telling[m.id] = 0; laatsteWeekIndex[m.id] = -Infinity; });
+
+    weekKeys.forEach((weekKey, weekIndex) => {
+      const maandag = App.datum.maandagVanWeekKey(weekKey);
+      const zondag = new Date(maandag.getTime()); zondag.setDate(zondag.getDate() + 6);
+      const gesorteerd = eligible.slice().sort((a, b) =>
+        telling[a.id] - telling[b.id] || laatsteWeekIndex[a.id] - laatsteWeekIndex[b.id]);
+
+      let gekozen = gesorteerd.find(m => !heeftVerlofConflict(m.id, maandag, zondag, false));
+      if (!gekozen) gekozen = gesorteerd.find(m => !heeftVerlofConflict(m.id, maandag, zondag, true));
+      if (!gekozen) gekozen = gesorteerd[0];
+
+      const dienst = App.model.nieuweStandbyDienst({ weekKey, medewerkerId: gekozen.id });
       stelDienstVerlofSamen(dienst);
       diensten.push(dienst);
+      telling[gekozen.id]++;
+      laatsteWeekIndex[gekozen.id] = weekIndex;
     });
 
     App.data.bewaarStandbyDiensten(diensten);

@@ -43,7 +43,7 @@ App.pages.verlof = (function () {
                 </select>
               </div>
             </div>
-            <p style="font-size:12px;color:#6b7280;margin:-4px 0 6px 0">Standby kan samen met verlof op dezelfde dag geregistreerd staan (bv. een verlofdag met avond-standby).</p>
+            <p style="font-size:12px;color:var(--tekst-secundair);margin:-4px 0 6px 0">Standby kan samen met verlof op dezelfde dag geregistreerd staan (bv. een verlofdag met avond-standby).</p>
             <div class="veld"><label>Opmerking</label><input name="opmerking"></div>
             <button type="submit" class="btn">Opslaan</button>
             <button type="button" id="annuleerBtn" class="btn secundair" style="display:none">Annuleren</button>
@@ -52,7 +52,7 @@ App.pages.verlof = (function () {
 
         <div class="card">
           <h3 id="terugkerendFormTitel">Terugkerend verlof (vaste vrije dag)</h3>
-          <p style="font-size:13px;color:#6b7280">Bijvoorbeeld: iedere maandag vrij, of om de week op vrijdag.</p>
+          <p style="font-size:13px;color:var(--tekst-secundair)">Bijvoorbeeld: iedere maandag vrij, of om de week op vrijdag.</p>
           <form id="terugkerendForm">
             <div class="veld">
               <label>Medewerker</label>
@@ -99,7 +99,7 @@ App.pages.verlof = (function () {
         <div class="toolbar">
           <h3 style="margin:0">Weekoverzicht per medewerker</h3>
           <div class="rij" style="margin:0;align-items:center">
-            <span style="font-size:13px;color:#4b5563">Van <strong id="matrixVanLabel"></strong></span>
+            <span style="font-size:13px;color:var(--tekst-secundair)">Van <strong id="matrixVanLabel"></strong></span>
             <div class="veld" style="margin:0">
               <label>Aantal weken vooruit</label>
               <select id="matrixWekenSelect">
@@ -119,7 +119,7 @@ App.pages.verlof = (function () {
           <span>Grijze rijen = weekend of NL-feestdag (geen werkdag)</span>
           <span>Klik op een verlofregel om 'm hieronder in de lijst te vinden</span>
         </div>
-        <div id="matrixWrap" class="tabel-wrap"></div>
+        <div id="matrixWrap" class="tabel-wrap matrix-scroll"></div>
       </div>
 
       <div class="card">
@@ -133,7 +133,7 @@ App.pages.verlof = (function () {
             </select>
           </div>
         </div>
-        <p style="font-size:13px;color:#6b7280">Opeenvolgende dagen (incl. weekenden) met hetzelfde type worden samengevoegd tot één periode; terugkerend verlof wordt samengevoegd tot één reeks.</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Opeenvolgende dagen (incl. weekenden) met hetzelfde type worden samengevoegd tot één periode; terugkerend verlof wordt samengevoegd tot één reeks.</p>
         <div class="tabel-wrap">
           <table>
             <thead><tr><th>Medewerker</th><th>Periode</th><th>Type</th><th>Opmerking</th><th></th></tr></thead>
@@ -223,7 +223,7 @@ App.pages.verlof = (function () {
       rijen += `<tr class="${nietWerkdag ? 'niet-werkdag' : ''}"><td>${App.datum.formatKort(dag)}</td><td>${dagLabel}</td>${cellen}</tr>`;
     });
 
-    wrap.innerHTML = `<table><thead>${header}</thead><tbody>${rijen}</tbody></table>`;
+    wrap.innerHTML = `<table class="matrix-tabel"><thead>${header}</thead><tbody>${rijen}</tbody></table>`;
     wrap.querySelectorAll('[data-verlof-id]').forEach(el =>
       el.addEventListener('click', () => springNaarRegel(el.dataset.verlofId, el.dataset.medewerkerId)));
   }

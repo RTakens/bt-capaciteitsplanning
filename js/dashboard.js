@@ -41,7 +41,7 @@ App.pages.dashboard = (function () {
     const overbelast = resultaten.filter(r => r.status === 'rood').length;
     const onderbenut = resultaten.filter(r => r.onderbenut).length;
 
-    const perType = { operatie: 0, valuestream: 0, project: 0 };
+    const perType = { operatie: 0, valuestream: 0, project: 0, changes: 0 };
     resultaten.forEach(r => Object.keys(perType).forEach(t => perType[t] += r.perType[t]));
 
     document.getElementById('dashboardInhoud').innerHTML = `
@@ -62,7 +62,7 @@ App.pages.dashboard = (function () {
           </div>
         </div>
         <div class="toolbar" style="margin-bottom:6px">
-          <span style="font-size:13px;color:#4b5563">Meerdere weken — klik op een week om erheen te springen</span>
+          <span style="font-size:13px;color:var(--tekst-secundair)">Meerdere weken — klik op een week om erheen te springen</span>
           <div class="veld" style="margin:0">
             <select id="bezettingKalenderWekenSelect">
               <option value="4">4 weken</option>
@@ -95,7 +95,7 @@ App.pages.dashboard = (function () {
             <strong id="periodeLabel">${bereik.label}</strong>
           </div>
         </div>
-        ${onderbenut ? `<p style="font-size:13px;color:#6b7280">${onderbenut} medewerker(s) zijn onderbenut (&lt;50% van beschikbare capaciteit ingepland).</p>` : ''}
+        ${onderbenut ? `<p style="font-size:13px;color:var(--tekst-secundair)">${onderbenut} medewerker(s) zijn onderbenut (&lt;50% van beschikbare capaciteit ingepland).</p>` : ''}
         <div class="tabel-wrap">
           <table>
             <thead><tr><th>Medewerker</th><th>Team</th><th>Beschikbaar</th><th>Gepland</th><th>Bezetting</th><th>Status</th></tr></thead>
@@ -137,7 +137,7 @@ App.pages.dashboard = (function () {
             </select>
           </div>
         </div>
-        <p style="font-size:13px;color:#6b7280">Bezetting per medewerker per week, vanaf de huidig geselecteerde week. Zo is toekomstige capaciteit in één oogopslag te zien.</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Bezetting per medewerker per week, vanaf de huidig geselecteerde week. Zo is toekomstige capaciteit in één oogopslag te zien.</p>
         <div class="tabel-wrap">${tekenVooruitblik(medewerkers, werkitems, verlof)}</div>
       </div>
     `;
@@ -235,15 +235,15 @@ App.pages.dashboard = (function () {
         <td><button type="button" class="btn secundair klein" data-toggle-dag="${r.iso}">${isOpen ? '▾' : '▸'}</button></td>
         <td>${App.datum.DAGEN_KORT[r.dag.getDay()]}</td>
         <td>${App.datum.formatKort(r.dag)}</td>
-        <td><strong style="color:${onderMinimum ? 'var(--rood)' : 'inherit'}">${r.aanwezig} / ${totaal}</strong></td>
+        <td><strong style="color:${onderMinimum ? 'var(--rood)' : 'inherit'}">${rond(r.aanwezig)} / ${totaal}</strong></td>
         <td>${r.verzoeken.length > 0 ? `<span class="badge verzoek">${r.verzoeken.length} open</span>` : '-'}</td>
-        <td${risicoBijGoedkeuring ? ' style="background:var(--rood-bg)"' : ''}>${r.verzoeken.length > 0 ? `<strong style="color:${risicoBijGoedkeuring ? 'var(--rood)' : 'inherit'}">${r.bijGoedkeuring} / ${totaal}</strong>${risicoBijGoedkeuring ? ' &#9888;' : ''}` : '-'}</td>
+        <td${risicoBijGoedkeuring ? ' style="background:var(--oranje-bg)"' : ''}>${r.verzoeken.length > 0 ? `<strong style="color:${risicoBijGoedkeuring ? 'var(--oranje-tekst)' : 'inherit'}">${rond(r.bijGoedkeuring)} / ${totaal}</strong>${risicoBijGoedkeuring ? ' &#9888;' : ''}` : '-'}</td>
       </tr>`;
       if (!isOpen) return hoofdRij;
       return hoofdRij + `<tr><td colspan="6" style="background:var(--grijs-bg)">${tekenDagDetail(r, magGoedkeuren)}</td></tr>`;
     }).join('');
 
-    return `<p style="font-size:13px;color:#6b7280">Minimale bezetting: ${instellingen.minimaleBezetting} medewerkers totaal (en eventueel per rol) — instelbaar bij Instellingen. Medewerkers met verlof (hele dag) tellen niet mee; open verzoeken worden apart getoond zodat je de impact van goedkeuring kunt inschatten. Klik op een dag om de bezetting per rol te zien.</p>
+    return `<p style="font-size:13px;color:var(--tekst-secundair)">Minimale bezetting: ${instellingen.minimaleBezetting} medewerkers totaal (en eventueel per rol) — instelbaar bij Instellingen. Een hele dag verlof telt niet mee, een halve dag (ochtend/middag) telt voor een halve medewerker mee; open verzoeken worden apart getoond zodat je de impact van goedkeuring kunt inschatten. Klik op een dag om de bezetting per rol te zien.</p>
       <div class="tabel-wrap"><table><thead>${header}</thead><tbody>${lichaam || '<tr><td colspan="6" class="leeg-melding">Geen werkdagen deze week.</td></tr>'}</tbody></table></div>`;
   }
 
@@ -264,7 +264,7 @@ App.pages.dashboard = (function () {
     const instellingen = App.settings.get();
     const huidigeWeek = App.datum.periodeBereik('week', bezettingRefDatum);
     const achtergrond = { groen: 'var(--groen-bg)', oranje: 'var(--oranje-bg)', rood: 'var(--rood-bg)' };
-    const kleur = { groen: 'var(--groen)', oranje: 'var(--oranje)', rood: 'var(--rood)' };
+    const kleur = { groen: 'var(--groen)', oranje: 'var(--oranje-tekst)', rood: 'var(--rood)' };
 
     const tegels = [];
     let cursor = new Date(huidigeWeek.start.getTime());
@@ -278,7 +278,7 @@ App.pages.dashboard = (function () {
     }
 
     return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      ${tegels.map(t => `<button type="button" data-spring-week="${t.iso}" style="cursor:pointer;border:${t.isHuidig ? '2px solid var(--blauw)' : '1px solid var(--grijs-rand)'};border-radius:6px;padding:6px 10px;text-align:center;background:${achtergrond[t.status]};color:${kleur[t.status]};font-size:12px;font-weight:600;min-width:70px">
+      ${tegels.map(t => `<button type="button" data-spring-week="${t.iso}" style="cursor:pointer;border:${t.isHuidig ? '2px solid var(--primair)' : '1px solid var(--grijs-rand)'};border-radius:6px;padding:6px 10px;text-align:center;background:${achtergrond[t.status]};color:${kleur[t.status]};font-size:12px;font-weight:600;min-width:70px">
         Wk ${t.nr}<br><span style="font-weight:normal;font-size:11px">${t.sub}</span>
       </button>`).join('')}
     </div>`;
@@ -286,7 +286,7 @@ App.pages.dashboard = (function () {
 
   function tekenDagDetail(r, magGoedkeuren) {
     const rolRijen = Object.entries(r.perRol).map(([rol, v]) => `<tr>
-      <td>${App.ui.escapeHtml(rol)}</td><td>${v.aanwezig} / ${v.totaal}</td>
+      <td>${App.ui.escapeHtml(rol)}</td><td>${rond(v.aanwezig)} / ${v.totaal}</td>
     </tr>`).join('');
     const rolTabel = `<table style="margin:4px 0 12px 0"><thead><tr><th>Rol</th><th>Aanwezig</th></tr></thead><tbody>${rolRijen}</tbody></table>`;
 
@@ -314,7 +314,7 @@ App.pages.dashboard = (function () {
     const rijen = medewerkers.map(m => {
       const cellen = weken.map(w => {
         const r = App.capacity.berekenMedewerker(m, w.start, w.eind, werkitems, verlof);
-        if (r.opVerlof) return `<td style="text-align:center;color:#9ca3af;font-style:italic" title="Op verlof deze week">verlof</td>`;
+        if (r.opVerlof) return `<td style="text-align:center;color:var(--tekst-secundair);font-style:italic" title="Op verlof deze week">verlof</td>`;
         const pct = Math.round(r.ratio * 100);
         const bgVar = r.status === 'rood' ? '--rood-bg' : r.status === 'oranje' ? '--oranje-bg' : '--groen-bg';
         const kleurVar = r.status === 'rood' ? '--rood' : r.status === 'oranje' ? '--oranje' : '--groen';
@@ -398,7 +398,7 @@ App.pages.dashboard = (function () {
   }
 
   function tekenVerdeling(perType, totaal) {
-    const kleuren = { operatie: '#1d4ed8', valuestream: '#0891b2', project: '#7c3aed' };
+    const kleuren = { operatie: '#1d4ed8', valuestream: '#0891b2', project: '#7c3aed', changes: '#ea580c' };
     const labels = App.pages.werkitems.TYPE_LABEL;
     if (!totaal) return '<p class="leeg-melding">Geen geplande uren in deze periode.</p>';
     const balken = Object.keys(perType).map(t => {

@@ -2,12 +2,13 @@
 // Employee:   { id, naam, team, rol, standbyDienst } - beschikbaarheid gaat uit van een vaste standaard (zie capacity.js);
 //             standbyDienst geeft aan of deze medewerker meedoet in de standby-rooster (zie standby.js)
 // LeaveEntry: { id, medewerkerId, datum, type: 'afwezig'|'standby'|'anders'|'verzoek', dagdeel: 'hele-dag'|'ochtend'|'middag', opmerking, herhalend }
-// WorkItem:   { id, titel, type: 'operatie'|'valuestream'|'project',
+// WorkItem:   { id, titel, type: 'operatie'|'valuestream'|'project'|'changes',
 //               startDatum, eindDatum, medewerkerIds[], team,
 //               applicatie, waardestroom, status, opmerking,
 //               afhankelijkVan: [werkitemId] (alleen relevant voor type 'project'),
-//               oorspronkelijkeStartDatum, oorspronkelijkeEindDatum (snapshot bij aanmaken, voor 'Aangepaste planningen'),
-//               laatsteAanpassingDatum (datum waarop de planning is doorgeschoven, alleen aanwezig na een aanpassing),
+//               oorspronkelijkeStartDatum, oorspronkelijkeEindDatum (snapshot bij aanmaken, ongebruikt buiten dit veld),
+//               aanpassingen: [{ vanStart, vanEind, naarStart, naarEind, datum, reden }] (één los record per
+//               doorschuiving, voor 'Aangepaste planningen' — behoudt de volledige historie i.p.v. alleen de laatste),
 //               weekUren: { [weekKey]: { [medewerkerId]: uren } } (verplichte weekplanning) }
 // Gebruiker:  { id, gebruikersnaam, wachtwoord, rol: 'teamlead'|'projectmanager'|'teammember'|'viewer', medewerkerId }
 // StandbyDienst: { id, weekKey, medewerkerId, verlofIds[] } - één standby-week; verlofIds verwijst naar de
@@ -17,7 +18,7 @@
 window.App = window.App || {};
 
 App.model = (function () {
-  const WERK_TYPES = ['operatie', 'valuestream', 'project'];
+  const WERK_TYPES = ['operatie', 'valuestream', 'project', 'changes'];
   const VERLOF_TYPES = ['afwezig', 'standby', 'anders', 'verzoek'];
   const DAGDELEN = ['hele-dag', 'ochtend', 'middag'];
   const STATUSSEN = ['gepland', 'lopend', 'afgerond', 'geannuleerd'];
@@ -44,7 +45,7 @@ App.model = (function () {
     const basis = {
       id: uid(), titel: '', type: 'project', startDatum: '', eindDatum: '',
       medewerkerIds: [], team: '', applicatie: '',
-      waardestroom: '', status: 'gepland', opmerking: '', weekUren: {}, afhankelijkVan: []
+      waardestroom: '', status: 'gepland', opmerking: '', weekUren: {}, afhankelijkVan: [], aanpassingen: []
     };
     const item = Object.assign(basis, overrides);
     if (!item.oorspronkelijkeStartDatum) item.oorspronkelijkeStartDatum = item.startDatum;

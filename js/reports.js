@@ -165,7 +165,7 @@ App.pages.rapportages = (function () {
     };
 
     return `<div class="card"><h3>Samenvatting per onderwerp</h3>
-      <p style="font-size:13px;color:#6b7280">Hoeveel uur is er per project/operatie/valuestream besteed, en wie heeft daaraan gewerkt.</p>
+      <p style="font-size:13px;color:var(--tekst-secundair)">Hoeveel uur is er per project/operatie/valuestream/changes besteed, en wie heeft daaraan gewerkt.</p>
       <div class="tabel-wrap"><table>
         <thead><tr><th>Onderwerp</th><th>Type</th><th>Uren</th><th>Medewerkers</th></tr></thead>
         <tbody>${rijenData.map(r => `<tr><td>${App.ui.escapeHtml(r.titel)}</td><td>${App.ui.escapeHtml(labels[r.type] || r.type)}</td><td>${rond(r.uren)}u</td><td>${App.ui.escapeHtml(r.medewerkerNamen)}</td></tr>`).join('') || '<tr><td colspan="4" class="leeg-melding">Geen geplande uren in deze periode.</td></tr>'}</tbody>

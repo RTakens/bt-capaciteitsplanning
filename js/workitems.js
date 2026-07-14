@@ -20,6 +20,7 @@ App.pages.werkitems = (function () {
                 <option value="operatie">Operatie</option>
                 <option value="valuestream">Valuestream</option>
                 <option value="project" selected>Project</option>
+                <option value="changes">Changes</option>
               </select>
             </div>
           </div>
@@ -45,7 +46,7 @@ App.pages.werkitems = (function () {
           </div>
           <div class="veld">
             <label>Weekplanning per medewerker (geschatte uren per week, per persoon)</label>
-            <p style="font-size:13px;color:#6b7280;margin:2px 0">Vul periode en medewerkers in en klik hieronder om de weekvelden aan te maken. Vul daarna per week en per medewerker de uren in. Met "Kopieer" zet je één week door naar alle overige weken.</p>
+            <p style="font-size:13px;color:var(--tekst-secundair);margin:2px 0">Vul periode en medewerkers in en klik hieronder om de weekvelden aan te maken. Vul daarna per week en per medewerker de uren in. Met "Kopieer" zet je één week door naar alle overige weken.</p>
             <button type="button" id="genereerWeekBtn" class="btn secundair klein">Weekvelden aanmaken/verversen</button>
             <div id="weekplanningWrap" class="tabel-wrap" style="margin-top:8px"></div>
           </div>
@@ -112,7 +113,7 @@ App.pages.werkitems = (function () {
         const waarde = (weekUren[wk] && weekUren[wk][m.id]) || 0;
         return `<td><input type="number" min="0" step="0.5" data-week="${wk}" data-medewerker="${m.id}" value="${waarde}" style="width:70px"></td>`;
       }).join('');
-      return `<tr><td>${wk}</td>${cellen}<td><button type="button" class="btn secundair klein" data-kopieer-week="${wk}">Kopieer naar alle weken</button></td></tr>`;
+      return `<tr><td>${wk}</td>${cellen}<td><button type="button" class="btn secundair klein" data-kopieer-week="${wk}">Kopieer naar onderstaande weken</button></td></tr>`;
     }).join('');
     wrap.innerHTML = `<table><thead>${header}</thead><tbody>${rijen}</tbody></table>`;
 
@@ -126,11 +127,11 @@ App.pages.werkitems = (function () {
       waarden[input.dataset.medewerker] = input.value;
     });
     document.querySelectorAll('#weekplanningWrap input[data-week]').forEach(input => {
-      if (input.dataset.week !== bronWeek && waarden[input.dataset.medewerker] != null) {
+      if (input.dataset.week > bronWeek && waarden[input.dataset.medewerker] != null) {
         input.value = waarden[input.dataset.medewerker];
       }
     });
-    App.ui.melding('Uren gekopieerd naar alle weken');
+    App.ui.melding('Uren gekopieerd naar onderstaande weken');
   }
 
   function lezenWeekUren() {
@@ -148,12 +149,14 @@ App.pages.werkitems = (function () {
       som + Object.values(perWeek).reduce((s, u) => s + (Number(u) || 0), 0), 0);
   }
 
-  const TYPE_LABEL = { operatie: 'Operatie', valuestream: 'Valuestream', project: 'Project' };
+  const TYPE_LABEL = { operatie: 'Operatie', valuestream: 'Valuestream', project: 'Project', changes: 'Changes' };
 
   function naamVan(id, medewerkers) { return (medewerkers.find(m => m.id === id) || {}).naam || 'Onbekend'; }
 
+  // Operatie en valuestream zijn doorlopend werk zonder harde einddatum en zijn daarom niet zinvol
+  // als afhankelijkheid; alleen project/changes-achtig werk met een duidelijk eindpunt komt in aanmerking.
   function optiesAfhankelijk(uitgesloten) {
-    const projecten = App.data.werkitems().filter(w => w.id !== uitgesloten);
+    const projecten = App.data.werkitems().filter(w => w.id !== uitgesloten && !['operatie', 'valuestream'].includes(w.type));
     if (!projecten.length) return '<em>Geen andere werkitems</em>';
     return projecten.map(w => `<label><input type="checkbox" value="${w.id}"> ${App.ui.escapeHtml(w.titel)}</label>`).join('');
   }

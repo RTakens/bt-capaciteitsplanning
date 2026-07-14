@@ -25,7 +25,7 @@ App.pages.projecten = (function () {
       </div>
       <div class="card">
         <h3>Aangepaste planningen</h3>
-        <p style="font-size:13px;color:#6b7280">Projecten waarvan de planning is doorgeschoven t.o.v. de oorspronkelijke periode (bv. door vertraging van een afhankelijkheid).</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Projecten waarvan de planning is doorgeschoven t.o.v. de oorspronkelijke periode (bv. door vertraging van een afhankelijkheid).</p>
         <div id="aangepastWrap"></div>
       </div>
     `;
@@ -57,7 +57,7 @@ App.pages.projecten = (function () {
     return { conflict: false };
   }
 
-  function verschuifWerkitem(item, nieuweStartDatum) {
+  function verschuifWerkitem(item, nieuweStartDatum, reden) {
     const oudeStart = App.datum.parseFlexibel(item.startDatum);
     const oudeEind = App.datum.parseFlexibel(item.eindDatum);
     const deltaDagen = Math.round((nieuweStartDatum - oudeStart) / 86400000);
@@ -72,19 +72,25 @@ App.pages.projecten = (function () {
       nieuweWeekUren[App.datum.weekKey(nieuweMaandag)] = item.weekUren[wk];
     });
 
+    const aanpassing = {
+      vanStart: item.startDatum, vanEind: item.eindDatum,
+      naarStart: App.datum.naarIso(nieuweStartDatum), naarEind: App.datum.naarIso(nieuweEind),
+      datum: App.datum.naarIso(new Date()), reden
+    };
+
     return Object.assign({}, item, {
       startDatum: App.datum.naarIso(nieuweStartDatum),
       eindDatum: App.datum.naarIso(nieuweEind),
       weekUren: nieuweWeekUren,
-      laatsteAanpassingDatum: App.datum.naarIso(new Date())
+      aanpassingen: [...(item.aanpassingen || []), aanpassing]
     });
   }
 
-  function doorschuiven(itemId, nieuweStartDatum) {
+  function doorschuiven(itemId, nieuweStartDatum, reden) {
     const lijst = App.data.werkitems();
     const idx = lijst.findIndex(w => w.id === itemId);
     if (idx < 0) return;
-    lijst[idx] = verschuifWerkitem(lijst[idx], nieuweStartDatum);
+    lijst[idx] = verschuifWerkitem(lijst[idx], nieuweStartDatum, reden);
     App.data.bewaarWerkitems(lijst);
     App.ui.melding('Planning doorgeschoven');
     teken();
@@ -100,12 +106,20 @@ App.pages.projecten = (function () {
       ? conflicten.map(c => `
         <div class="card" style="border-color:var(--rood);background:var(--rood-bg)">
           <strong>${App.ui.escapeHtml(c.item.titel)}</strong> kan niet starten op ${c.item.startDatum} — een afhankelijkheid loopt door tot na de geplande start.
-          ${App.auth.magBewerken() ? `<button class="btn gevaar klein" data-doorschuiven="${c.item.id}" data-nieuwe-start="${App.datum.naarIso(c.nieuweStart)}" style="margin-left:8px">Doorschuiven naar ${App.datum.formatKort(c.nieuweStart)}</button>` : ''}
+          ${App.auth.magBewerken() ? `
+          <div class="rij" style="margin-top:8px;align-items:center">
+            <div class="veld" style="margin:0;flex:1"><input type="text" placeholder="Reden van doorschuiven (bv. uitloop project X)" data-reden-doorschuiven="${c.item.id}"></div>
+            <button class="btn gevaar klein" data-doorschuiven="${c.item.id}" data-nieuwe-start="${App.datum.naarIso(c.nieuweStart)}">Doorschuiven naar ${App.datum.formatKort(c.nieuweStart)}</button>
+          </div>` : ''}
         </div>
       `).join('')
       : '';
-    document.querySelectorAll('[data-doorschuiven]').forEach(b => b.addEventListener('click', () =>
-      doorschuiven(b.dataset.doorschuiven, App.datum.parseIso(b.dataset.nieuweStart))));
+    document.querySelectorAll('[data-doorschuiven]').forEach(b => b.addEventListener('click', () => {
+      const redenInput = document.querySelector(`[data-reden-doorschuiven="${b.dataset.doorschuiven}"]`);
+      const reden = redenInput ? redenInput.value.trim() : '';
+      if (!reden) { App.ui.melding('Vul eerst een reden van doorschuiven in'); return; }
+      doorschuiven(b.dataset.doorschuiven, App.datum.parseIso(b.dataset.nieuweStart), reden);
+    }));
 
     document.getElementById('ganttWrap').innerHTML = tekenGantt(projecten, alleWerkitems);
 
@@ -121,15 +135,19 @@ App.pages.projecten = (function () {
       }));
     }
 
-    const aangepast = projecten.filter(p => p.startDatum !== p.oorspronkelijkeStartDatum || p.eindDatum !== p.oorspronkelijkeEindDatum);
-    document.getElementById('aangepastWrap').innerHTML = aangepast.length
+    // Elke verschuiving is een los record (project.aanpassingen[]), zodat de volledige historie behouden blijft
+    // i.p.v. alleen de meest recente aanpassing.
+    const aanpassingRecords = projecten.flatMap(p => (p.aanpassingen || []).map(a => Object.assign({ titel: p.titel }, a)))
+      .sort((a, b) => b.datum.localeCompare(a.datum));
+    document.getElementById('aangepastWrap').innerHTML = aanpassingRecords.length
       ? `<div class="tabel-wrap"><table>
-          <thead><tr><th>Project</th><th>Oorspronkelijke periode</th><th>Nieuwe periode</th><th>Aangepast op</th></tr></thead>
-          <tbody>${aangepast.map(p => `<tr>
-            <td>${App.ui.escapeHtml(p.titel)}</td>
-            <td>${p.oorspronkelijkeStartDatum} &rarr; ${p.oorspronkelijkeEindDatum}</td>
-            <td>${p.startDatum} &rarr; ${p.eindDatum}</td>
-            <td>${p.laatsteAanpassingDatum ? App.datum.formatKort(App.datum.parseIso(p.laatsteAanpassingDatum)) : '-'}</td>
+          <thead><tr><th>Project</th><th>Oorspronkelijke periode</th><th>Nieuwe periode</th><th>Reden</th><th>Aangepast op</th></tr></thead>
+          <tbody>${aanpassingRecords.map(a => `<tr>
+            <td>${App.ui.escapeHtml(a.titel)}</td>
+            <td>${a.vanStart} &rarr; ${a.vanEind}</td>
+            <td>${a.naarStart} &rarr; ${a.naarEind}</td>
+            <td>${App.ui.escapeHtml(a.reden || '-')}</td>
+            <td>${App.datum.formatKort(App.datum.parseIso(a.datum))}</td>
           </tr>`).join('')}</tbody>
         </table></div>`
       : '<p class="leeg-melding">Geen aangepaste planningen.</p>';
@@ -169,7 +187,7 @@ App.pages.projecten = (function () {
     const maandLijnen = maanden.map(m => {
       const x = xVoorDatum(m);
       return `<line x1="${x}" y1="20" x2="${x}" y2="${hoogte}" stroke="var(--grijs-rand)" stroke-width="1"></line>
-        <text x="${x + 4}" y="14" font-size="11" fill="#6b7280">${App.ui.escapeHtml(m.toLocaleDateString('nl-NL', { month: 'short', year: '2-digit' }))}</text>`;
+        <text x="${x + 4}" y="14" font-size="11" fill="var(--tekst-secundair)">${App.ui.escapeHtml(m.toLocaleDateString('nl-NL', { month: 'short', year: '2-digit' }))}</text>`;
     }).join('');
 
     const afhankelijkheidLijnen = parsed.map((p, i) => (p.project.afhankelijkVan || []).map(depId => {
@@ -181,15 +199,22 @@ App.pages.projecten = (function () {
       const x2 = xVoorDatum(p.start);
       const y2 = 28 + i * rijHoogte + rijHoogte / 2;
       const xTussen = x1 + 10;
-      return `<path d="M${x1},${y1} L${xTussen},${y1} L${xTussen},${y2} L${x2},${y2}" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#gantt-arrow)"></path>`;
+      return `<path d="M${x1},${y1} L${xTussen},${y1} L${xTussen},${y2} L${x2},${y2}" fill="none" stroke="var(--tekst-secundair)" stroke-width="1.5" stroke-dasharray="3,2" marker-end="url(#gantt-arrow)"></path>`;
     }).join('')).join('');
+
+    const vandaag = new Date();
+    vandaag.setHours(0, 0, 0, 0);
+    const vandaagLijn = (vandaag >= minDatum && vandaag <= maxDatum)
+      ? `<line x1="${xVoorDatum(vandaag)}" y1="20" x2="${xVoorDatum(vandaag)}" y2="${hoogte}" stroke="var(--rood)" stroke-width="1.5"></line>
+         <text x="${xVoorDatum(vandaag) + 4}" y="${hoogte - 4}" font-size="11" fill="var(--rood)">Vandaag</text>`
+      : '';
 
     const balken = parsed.map((p, i) => {
       const y = 28 + i * rijHoogte;
       const x1 = xVoorDatum(p.start);
       const x2 = xVoorDatum(p.eind) + pxPerDag;
       const conflict = vindConflict(p.project, alleWerkitems).conflict;
-      const kleur = conflict ? 'var(--rood)' : 'var(--blauw)';
+      const kleur = conflict ? 'var(--rood)' : 'var(--primair)';
       return `<text x="4" y="${y + rijHoogte / 2 + 4}" font-size="12" fill="var(--tekst)">${App.ui.escapeHtml(p.project.titel)}</text>
         <rect x="${x1}" y="${y + 6}" width="${Math.max(4, x2 - x1)}" height="${rijHoogte - 14}" rx="4" fill="${kleur}"><title>${App.ui.escapeHtml(p.project.titel)}: ${p.project.startDatum} &rarr; ${p.project.eindDatum}</title></rect>`;
     }).join('');
@@ -198,15 +223,16 @@ App.pages.projecten = (function () {
       <svg width="${breedte}" height="${hoogte}" style="font-family:inherit;min-width:100%">
         <defs>
           <marker id="gantt-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L6,3 L0,6 Z" fill="#9ca3af"></path>
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--tekst-secundair)"></path>
           </marker>
         </defs>
         ${maandLijnen}
         ${afhankelijkheidLijnen}
         ${balken}
+        ${vandaagLijn}
       </svg>
     </div>
-    <p style="font-size:12px;color:#6b7280;margin-top:6px">Gestippelde lijnen tonen afhankelijkheden tussen projecten. Rode balken hebben een planningsconflict (zie hierboven).</p>`;
+    <p style="font-size:12px;color:var(--tekst-secundair);margin-top:6px">Gestippelde lijnen tonen afhankelijkheden tussen projecten. Rode balken hebben een planningsconflict (zie hierboven).</p>`;
   }
 
   function rijProject(p, medewerkers, alleWerkitems) {

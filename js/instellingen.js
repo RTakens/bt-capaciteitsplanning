@@ -38,7 +38,7 @@ App.pages.instellingen = (function () {
     container.innerHTML = `
       <div class="card">
         <h3>Bezetting per medewerker (Dashboard)</h3>
-        <p style="font-size:13px;color:#6b7280">Vanaf welke bezetting geldt een medewerker als "bijna vol" (oranje) of "overbelast" (rood)?</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Vanaf welke bezetting geldt een medewerker als "bijna vol" (oranje) of "overbelast" (rood)?</p>
         <form id="drempelForm">
           <div class="rij">
             <div class="veld"><label>Bijna vol vanaf (%)</label><input type="number" name="oranjeGrens" min="0" max="100" step="1" value="${Math.round(s.oranjeGrens * 100)}" required></div>
@@ -50,7 +50,7 @@ App.pages.instellingen = (function () {
 
       <div class="card">
         <h3>Minimale bezetting (Dashboard)</h3>
-        <p style="font-size:13px;color:#6b7280">Minimum aantal medewerkers dat per dag aanwezig moet zijn. Een dag met minder aanwezige medewerkers (totaal, of voor een specifieke rol) wordt rood gemarkeerd in het bezettingsoverzicht.</p>
+        <p style="font-size:13px;color:var(--tekst-secundair)">Minimum aantal medewerkers dat per dag aanwezig moet zijn. Een dag met minder aanwezige medewerkers (totaal, of voor een specifieke rol) wordt rood gemarkeerd in het bezettingsoverzicht.</p>
         <form id="bezettingForm">
           <div class="veld"><label>Minimale bezetting totaal (aantal medewerkers)</label><input type="number" name="minimaleBezetting" min="0" step="1" value="${s.minimaleBezetting}" required></div>
           ${rollen.length ? `<h4 style="margin-bottom:6px">Per rol (0 = geen aparte eis)</h4>

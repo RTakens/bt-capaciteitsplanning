@@ -82,7 +82,7 @@ App.capacity = (function () {
     const { beschikbaar, verlofDagen, standbyDagen, totaalWerkdagen, heeftVerlofNietHerhalend } =
       medewerkerBeschikbaarInPeriode(medewerker, periodeStart, periodeEind, alleVerlof);
     const relevanteItems = alleWerkitems.filter(w => w.medewerkerIds.includes(medewerker.id));
-    const perType = { operatie: 0, valuestream: 0, project: 0 };
+    const perType = { operatie: 0, valuestream: 0, project: 0, changes: 0 };
     const werkitemDetails = [];
     let gepland = 0;
 
@@ -145,8 +145,16 @@ App.capacity = (function () {
       if (!perRol[rol]) perRol[rol] = { aanwezig: 0, totaal: 0 };
       perRol[rol].totaal++;
       const entries = verlof.filter(v => v.medewerkerId === m.id && v.datum === iso);
-      const heleDagAfwezig = entries.some(v => (v.type === 'afwezig' || v.type === 'anders') && (!v.dagdeel || v.dagdeel === 'hele-dag'));
-      if (!heleDagAfwezig) { aanwezig++; perRol[rol].aanwezig++; }
+      const afwezigEntries = entries.filter(v => v.type === 'afwezig' || v.type === 'anders');
+      // Ochtend/middag telt als een half dagdeel afwezig; hele-dag (of twee losse halve dagdelen) telt als heel de dag.
+      const dagdelenAfwezig = new Set();
+      afwezigEntries.forEach(v => {
+        if (!v.dagdeel || v.dagdeel === 'hele-dag') { dagdelenAfwezig.add('ochtend'); dagdelenAfwezig.add('middag'); }
+        else dagdelenAfwezig.add(v.dagdeel);
+      });
+      const aanwezigheid = Math.max(0, 1 - dagdelenAfwezig.size * 0.5);
+      aanwezig += aanwezigheid;
+      perRol[rol].aanwezig += aanwezigheid;
     });
     const rolDrempelOverschreden = Object.entries(perRol).some(([rol, v]) =>
       (instellingen.minimaleBezettingPerRol[rol] || 0) > 0 && v.aanwezig < instellingen.minimaleBezettingPerRol[rol]);
