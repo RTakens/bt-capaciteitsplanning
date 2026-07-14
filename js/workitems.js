@@ -28,6 +28,10 @@ App.pages.werkitems = (function () {
             <div class="veld"><label>Startdatum</label><input type="date" name="startDatum" required></div>
             <div class="veld"><label>Einddatum</label><input type="date" name="eindDatum" required></div>
           </div>
+          <div class="veld">
+            <label>Reden van aanpassing (verplicht als je bij een bestaand project de periode wijzigt)</label>
+            <input name="redenAanpassing" placeholder="bv. uitloop project X">
+          </div>
           <div class="rij">
             <div class="veld"><label>Team</label><input name="team" value="BT"></div>
             <div class="veld"><label>Applicatie</label><input name="applicatie"></div>
@@ -41,7 +45,7 @@ App.pages.werkitems = (function () {
             <div class="checklijst" id="medewerkerCheck">${medewerkers.map(m => `<label><input type="checkbox" value="${m.id}"> ${App.ui.escapeHtml(m.naam)}</label>`).join('') || '<em>Geen medewerkers</em>'}</div>
           </div>
           <div class="veld">
-            <label>Afhankelijk van (moet eerst afgerond zijn, alleen relevant voor projecten)</label>
+            <label>Afhankelijk van (moet eerst afgerond zijn, alleen relevant voor projecten en changes)</label>
             <div class="checklijst" id="afhankelijkCheck">${optiesAfhankelijk(null)}</div>
           </div>
           <div class="veld">
@@ -205,6 +209,7 @@ App.pages.werkitems = (function () {
     form.waardestroom.value = w.waardestroom;
     form.status.value = w.status;
     form.opmerking.value = w.opmerking || '';
+    form.redenAanpassing.value = '';
     document.querySelectorAll('#medewerkerCheck input').forEach(cb => { cb.checked = w.medewerkerIds.includes(cb.value); });
     document.getElementById('afhankelijkCheck').innerHTML = optiesAfhankelijk(w.id);
     document.querySelectorAll('#afhankelijkCheck input').forEach(cb => { cb.checked = (w.afhankelijkVan || []).includes(cb.value); });
@@ -255,7 +260,22 @@ App.pages.werkitems = (function () {
 
     const lijst = App.data.werkitems();
     if (bewerkId) {
-      App.data.upsert(lijst, Object.assign({ id: bewerkId }, data));
+      const bestaand = lijst.find(w => w.id === bewerkId);
+      const periodeGewijzigd = bestaand && (bestaand.startDatum !== data.startDatum || bestaand.eindDatum !== data.eindDatum);
+      if (periodeGewijzigd && bestaand.type === 'project') {
+        const reden = form.redenAanpassing.value.trim();
+        if (!reden) {
+          App.ui.melding('Vul een reden van aanpassing in, want de periode is gewijzigd');
+          return;
+        }
+        data.aanpassingen = [...(bestaand.aanpassingen || []), {
+          vanStart: bestaand.startDatum, vanEind: bestaand.eindDatum,
+          naarStart: data.startDatum, naarEind: data.eindDatum,
+          datum: App.datum.naarIso(new Date()), reden
+        }];
+      }
+      // Behoud velden die niet in het formulier zitten (oorspronkelijke periode-snapshot, aanpassingen-historie).
+      App.data.upsert(lijst, Object.assign({}, bestaand, data, { id: bewerkId }));
       App.ui.melding('Werkitem gewijzigd');
     } else {
       App.data.upsert(lijst, App.model.nieuwWerkitem(data));

@@ -10,6 +10,9 @@ App.pages.dashboard = (function () {
   let bezettingRefDatum = new Date();
   let bezettingUitgeklapt = new Set();
   let bezettingKalenderWeken = 8;
+  // Vast venster van weken voor de kalender, los van bezettingRefDatum (dat stuurt alleen de dag-detailtabel eronder) —
+  // zo verschuift het venster niet wanneer je in de kalender op een week klikt.
+  const bezettingKalenderVenster = App.datum.periodeBereik('week', new Date()).start;
 
   function render(container) {
     container.innerHTML = `
@@ -208,12 +211,24 @@ App.pages.dashboard = (function () {
     const naamVan = id => (medewerkers.find(m => m.id === id) || {}).naam || 'Onbekend';
     const basis = App.capacity.bezettingVoorDag(dag, medewerkers, verlof, instellingen);
     const verzoeken = [];
+    const verzoekPerRol = {};
     medewerkers.forEach(m => {
       const entries = verlof.filter(v => v.medewerkerId === m.id && v.datum === iso && v.type === 'verzoek');
-      entries.forEach(v => verzoeken.push({ id: v.id, medewerkerId: m.id, naam: naamVan(m.id) }));
+      if (entries.length) {
+        const rol = m.rol || 'Onbekend';
+        verzoekPerRol[rol] = (verzoekPerRol[rol] || 0) + entries.length;
+        entries.forEach(v => verzoeken.push({ id: v.id, medewerkerId: m.id, naam: naamVan(m.id) }));
+      }
     });
     const bijGoedkeuring = Math.max(0, basis.aanwezig - verzoeken.length);
-    const risicoBijGoedkeuring = verzoeken.length > 0 && bijGoedkeuring < instellingen.minimaleBezetting;
+    // Niet alleen de totale drempel kan bij goedkeuring overschreden worden, ook een drempel per rol
+    // (bv. alle openstaande verzoeken zitten toevallig allemaal in dezelfde rol).
+    const rolRisicoBijGoedkeuring = Object.entries(basis.perRol).some(([rol, v]) => {
+      const minimum = instellingen.minimaleBezettingPerRol[rol] || 0;
+      if (!minimum) return false;
+      return Math.max(0, v.aanwezig - (verzoekPerRol[rol] || 0)) < minimum;
+    });
+    const risicoBijGoedkeuring = verzoeken.length > 0 && (bijGoedkeuring < instellingen.minimaleBezetting || rolRisicoBijGoedkeuring);
     return Object.assign({ dag, iso, verzoeken, bijGoedkeuring, risicoBijGoedkeuring }, basis);
   }
 
@@ -262,17 +277,17 @@ App.pages.dashboard = (function () {
 
   function tekenBezettingKalender(medewerkers, verlof) {
     const instellingen = App.settings.get();
-    const huidigeWeek = App.datum.periodeBereik('week', bezettingRefDatum);
+    const geselecteerdeWeek = App.datum.periodeBereik('week', bezettingRefDatum);
     const achtergrond = { groen: 'var(--groen-bg)', oranje: 'var(--oranje-bg)', rood: 'var(--rood-bg)' };
     const kleur = { groen: 'var(--groen)', oranje: 'var(--oranje-tekst)', rood: 'var(--rood)' };
 
     const tegels = [];
-    let cursor = new Date(huidigeWeek.start.getTime());
+    let cursor = new Date(bezettingKalenderVenster.getTime());
     for (let i = 0; i < bezettingKalenderWeken; i++) {
       const eind = new Date(cursor.getTime()); eind.setDate(cursor.getDate() + 6);
       const wk = App.datum.isoWeek(cursor);
       const status = berekenWeekStatusBezetting(cursor, eind, medewerkers, verlof, instellingen);
-      const isHuidig = App.datum.naarIso(cursor) === App.datum.naarIso(huidigeWeek.start);
+      const isHuidig = App.datum.naarIso(cursor) === App.datum.naarIso(geselecteerdeWeek.start);
       tegels.push({ iso: App.datum.naarIso(cursor), nr: wk.week, sub: App.datum.formatKort(cursor), status, isHuidig });
       cursor.setDate(cursor.getDate() + 7);
     }
